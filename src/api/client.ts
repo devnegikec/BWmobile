@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // Base URLs — ngrok tunnel to local dev server
-const NGROK_HOST = 'https://9d5e-103-228-221-253.ngrok-free.app';
+const NGROK_HOST = 'https://2a3a-2401-4900-94e3-744a-d8ac-209f-616-27e5.ngrok-free.app';
 const IDENTITY_BASE_URL = `${NGROK_HOST}/api/v1`;
 const CORE_BASE_URL = `${NGROK_HOST}/api/v1`;
 
@@ -119,6 +119,11 @@ function processQueue(error: unknown, token: string | null) {
 }
 
 async function handle401(error: AxiosError) {
+  // Only intercept 401 Unauthorized errors — don't retry timeouts, network errors, etc.
+  if (error.response?.status !== 401) {
+    return Promise.reject(error);
+  }
+
   const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
   // Already retried — give up
