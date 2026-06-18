@@ -20,6 +20,7 @@ export async function generatePutAwayFromSlip(
 // ---------- List Put-Away Lists ----------
 export async function getPutAwayLists(params?: {
   warehouse_id?: string;
+  receiving_slip_id?: string;
   status?: 'pending' | 'completed';
   page?: number;
   page_size?: number;
