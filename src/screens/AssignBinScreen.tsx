@@ -20,6 +20,9 @@ type ScanPhase = 'idle' | 'scanning_bin' | 'scanning_item' | 'confirm' | 'succes
 interface BinInfo {
   bin_location_id: string;
   bin_code: string;
+  full_path: string;
+  warehouse_id: string;
+  warehouse_name: string;
 }
 
 interface ItemInfo {
@@ -39,6 +42,7 @@ export default function AssignBinScreen() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [lastAssigned, setLastAssigned] = useState<{
     binCode: string;
+    fullPath: string;
     sku: string;
     qty: number;
   } | null>(null);
@@ -49,20 +53,41 @@ export default function AssignBinScreen() {
   const parseBinQR = (data: string): BinInfo | null => {
     try {
       const parsed = JSON.parse(data);
+
+      // New format: { type: "location", location_id, location_code, full_path, ... }
+      if (parsed.type === 'location' && parsed.location_id && parsed.location_code) {
+        return {
+          bin_location_id: parsed.location_id,
+          bin_code: parsed.location_code,
+          full_path: parsed.full_path || parsed.location_code,
+          warehouse_id: parsed.warehouse_id || '',
+          warehouse_name: parsed.warehouse_name || '',
+        };
+      }
+
+      // Legacy format fallback
       const binId = parsed.bin_id || parsed.bin_location_id || parsed.id;
       const binCode = parsed.bin_code || parsed.code || parsed.location;
       if (binId && binCode) {
-        return { bin_location_id: binId, bin_code: binCode };
-      }
-      // Fallback: treat raw string as bin code
-      if (data.trim().length > 0 && !data.startsWith('{')) {
-        return { bin_location_id: data.trim(), bin_code: data.trim() };
+        return {
+          bin_location_id: binId,
+          bin_code: binCode,
+          full_path: binCode,
+          warehouse_id: '',
+          warehouse_name: '',
+        };
       }
       return null;
     } catch {
       // Treat raw string as bin code
       if (data.trim().length > 0) {
-        return { bin_location_id: data.trim(), bin_code: data.trim() };
+        return {
+          bin_location_id: data.trim(),
+          bin_code: data.trim(),
+          full_path: data.trim(),
+          warehouse_id: '',
+          warehouse_name: '',
+        };
       }
       return null;
     }
@@ -140,6 +165,7 @@ export default function AssignBinScreen() {
 
       setLastAssigned({
         binCode: binInfo.bin_code,
+        fullPath: binInfo.full_path,
         sku: itemInfo.sku,
         qty: itemInfo.quantity,
       });
@@ -191,8 +217,16 @@ export default function AssignBinScreen() {
         {/* Bin info bar */}
         {binInfo && (
           <View style={styles.selectedBar}>
-            <Text style={styles.selectedLabel}>Bin</Text>
-            <Text style={styles.selectedValue}>{binInfo.bin_code}</Text>
+            <View>
+              <Text style={styles.selectedLabel}>Bin</Text>
+              <Text style={styles.selectedValue}>{binInfo.bin_code}</Text>
+              {binInfo.full_path !== binInfo.bin_code && (
+                <Text style={styles.selectedPath}>{binInfo.full_path}</Text>
+              )}
+              {binInfo.warehouse_name ? (
+                <Text style={styles.selectedWarehouse}>{binInfo.warehouse_name}</Text>
+              ) : null}
+            </View>
           </View>
         )}
         <QrScanner
@@ -220,6 +254,18 @@ export default function AssignBinScreen() {
             <Text style={styles.confirmLabel}>Bin</Text>
             <Text style={styles.confirmValue}>{binInfo.bin_code}</Text>
           </View>
+          {binInfo.full_path !== binInfo.bin_code && (
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Path</Text>
+              <Text style={styles.confirmValue}>{binInfo.full_path}</Text>
+            </View>
+          )}
+          {binInfo.warehouse_name ? (
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Warehouse</Text>
+              <Text style={styles.confirmValue}>{binInfo.warehouse_name}</Text>
+            </View>
+          ) : null}
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Item</Text>
             <Text style={styles.confirmValue}>{itemInfo.sku}</Text>
@@ -274,6 +320,9 @@ export default function AssignBinScreen() {
               {lastAssigned.sku} × {lastAssigned.qty}
             </Text>
             <Text style={styles.successDetail}>→ Bin: {lastAssigned.binCode}</Text>
+            {lastAssigned.fullPath !== lastAssigned.binCode && (
+              <Text style={styles.successPath}>{lastAssigned.fullPath}</Text>
+            )}
           </View>
           <TouchableOpacity style={styles.primaryButton} onPress={handleAssignAnother}>
             <Text style={styles.primaryButtonText}>Assign Another</Text>
@@ -402,6 +451,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  selectedPath: {
+    color: '#8899AA',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  selectedWarehouse: {
+    color: '#1A73E8',
+    fontSize: 11,
+    marginTop: 2,
+  },
 
   // Confirm
   confirmContent: {
@@ -467,6 +526,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  successPath: {
+    color: '#8899AA',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 2,
   },
 
   // Shared buttons

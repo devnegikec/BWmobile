@@ -209,6 +209,20 @@ export interface PaginatedResponse<T> {
   pagination: Pagination;
 }
 
+// ---------- Bin QR ----------
+export interface BinQRPayload {
+  type: 'location';
+  org_id: string;
+  org_name: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id: string;
+  full_path: string;
+  location_type: string;
+  location_code: string;
+}
+
 // ---------- API Error ----------
 export interface ApiError {
   detail: string;
