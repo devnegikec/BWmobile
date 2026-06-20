@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // Base URLs — ngrok tunnel to local dev server
-const NGROK_HOST = 'https://2a3a-2401-4900-94e3-744a-d8ac-209f-616-27e5.ngrok-free.app';
+const NGROK_HOST = 'https://f4fd-2401-4900-6302-5953-510c-921a-4868-77e4.ngrok-free.app';
 const IDENTITY_BASE_URL = `${NGROK_HOST}/api/v1`;
 const CORE_BASE_URL = `${NGROK_HOST}/api/v1`;
 
@@ -185,7 +185,7 @@ coreClient.interceptors.response.use((res) => res, handle401);
 identityClient.interceptors.response.use((res) => res, handle401);
 
 // Request: attach JWT token to authenticated requests
-const PUBLIC_ENDPOINTS = ['/identity/login', '/identity/refresh', '/wms-workers/login/barcode'];
+const PUBLIC_ENDPOINTS = ['/identity/login', '/identity/refresh', '/identity/login/qr-code', '/wms-workers/login/barcode'];
 
 async function authRequestInterceptor(
   config: InternalAxiosRequestConfig

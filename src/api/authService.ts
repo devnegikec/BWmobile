@@ -6,6 +6,8 @@ import type {
   LoginRequest,
   LoginResponse,
   BarcodeLoginRequest,
+  QRLoginRequest,
+  QRLoginResponse,
   WorkerLoginResponse,
   Warehouse,
 } from '../types';
@@ -25,6 +27,20 @@ export async function loginWithBarcode(payload: BarcodeLoginRequest): Promise<Wo
   );
   // Barcode login returns only access_token (24h), no refresh token
   await saveTokens(data.access_token);
+  return data;
+}
+
+// ---------- QR Code Login (Identity Service) ----------
+// The QR code encodes the worker's unique qr_code string (e.g., "WRK-A1B2C3D4E5F6").
+// This endpoint authenticates via the Identity Service and returns both
+// access_token (20h) and refresh_token (40h), plus the full User object.
+export async function loginWithQRCode(payload: QRLoginRequest): Promise<QRLoginResponse> {
+  const { data } = await identityClient.post<QRLoginResponse>(
+    '/identity/login/qr-code',
+    payload
+  );
+  // QR login returns both access_token and refresh_token
+  await saveTokens(data.access_token, data.refresh_token);
   return data;
 }
 

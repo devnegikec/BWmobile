@@ -1,5 +1,7 @@
 // ============================================================
-// QR Login Screen — Worker barcode/QR scanning login
+// QR Login Screen — Worker QR code scanning login
+// Uses Identity Service POST /api/v1/identity/login/qr-code
+// The QR encodes a plain string like "WRK-A1B2C3D4E5F6"
 // ============================================================
 import React, { useState } from 'react';
 import {
@@ -12,7 +14,7 @@ import QrScanner from '../components/QrScanner';
 import { useAuthStore } from '../store/authStore';
 
 export default function QrLoginScreen({ navigation }: any) {
-  const { loginWithBarcode, isLoading } = useAuthStore();
+  const { loginWithQRCode, isLoading } = useAuthStore();
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -20,8 +22,8 @@ export default function QrLoginScreen({ navigation }: any) {
     setScanResult(data);
     setLoginError(null);
     try {
-      // The QR code contains the worker's barcode value
-      await loginWithBarcode(data);
+      // The QR code contains the worker's unique qr_code string
+      await loginWithQRCode(data);
       // Navigation will happen automatically via auth state change
     } catch (err: any) {
       setLoginError(err.message);
@@ -36,7 +38,7 @@ export default function QrLoginScreen({ navigation }: any) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Worker QR Login</Text>
         <Text style={styles.headerSubtitle}>
-          Scan your worker QR/barcode to sign in
+          Scan your worker QR code to sign in
         </Text>
       </View>
 
@@ -54,7 +56,7 @@ export default function QrLoginScreen({ navigation }: any) {
       {isLoading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1A73E8" />
-          <Text style={styles.loadingText}>Authenticating...</Text>
+          <Text style={styles.loadingText}>Logging you in...</Text>
         </View>
       )}
 

@@ -19,6 +19,7 @@ interface AuthState {
   // Actions
   loginWithPassword: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   loginWithBarcode: (barcode: string) => Promise<void>;
+  loginWithQRCode: (qrCode: string) => Promise<void>;
   loadWarehouses: () => Promise<void>;
   selectWarehouse: (warehouse: Warehouse) => void;
   logout: () => Promise<void>;
@@ -71,6 +72,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         worker: response.worker,
         user: null,
+        isLoading: false,
+      });
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || 'Invalid QR code. Please try again.';
+      set({ isLoading: false, error: detail });
+      throw new Error(detail);
+    }
+  },
+
+  // ---------- QR Code Login (Identity Service) ----------
+  loginWithQRCode: async (qrCode) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await authService.loginWithQRCode({ qr_code: qrCode });
+      set({
+        isAuthenticated: true,
+        user: response.user,
+        worker: null,
         isLoading: false,
       });
     } catch (error: any) {

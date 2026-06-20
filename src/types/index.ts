@@ -18,6 +18,10 @@ export interface BarcodeLoginRequest {
   barcode: string;
 }
 
+export interface QRLoginRequest {
+  qr_code: string;
+}
+
 export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -38,6 +42,12 @@ export interface User {
 }
 
 export interface LoginResponse extends TokenResponse {
+  user: User;
+}
+
+export interface QRLoginResponse extends TokenResponse {
+  access_token: string;
+  refresh_token: string;
   user: User;
 }
 
