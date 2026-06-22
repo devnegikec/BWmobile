@@ -47,21 +47,23 @@ export async function getBinStockForItem(itemId: string): Promise<{ bins: BinSto
   return data;
 }
 
-// ---------- Lookup Item by SKU ----------
+// ---------- Lookup Item by SKU (barcode / item_code) ----------
+// Uses /items/by-sku/{sku} — direct lookup, works regardless of stock levels
 export async function lookupItemBySku(
   sku: string,
-  warehouseId: string
+  _warehouseId: string
 ): Promise<{ item_id: string; sku: string; name: string } | null> {
   try {
-    const { data } = await coreClient.get<{ items: Array<{ id: string; sku: string; name: string }> }>(
-      '/stock-levels',
-      { params: { search: sku, warehouse_id: warehouseId, page_size: 1 } }
-    );
-    const items = data.items || [];
-    if (items.length > 0) {
-      return { item_id: items[0].id, sku: items[0].sku, name: items[0].name };
-    }
-    return null;
+    const { data } = await coreClient.get<{
+      id: string;
+      item_code: string;
+      item_name: string;
+    }>(`/items/by-sku/${encodeURIComponent(sku)}`);
+    return {
+      item_id: data.id,
+      sku: data.item_code,
+      name: data.item_name,
+    };
   } catch {
     return null;
   }

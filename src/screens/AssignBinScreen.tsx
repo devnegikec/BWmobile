@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -47,8 +48,42 @@ export default function AssignBinScreen() {
     qty: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState('1');
+  const [editBatch, setEditBatch] = useState('');
 
   // ============ QR Parsing ============
+
+  /** Extract a likely SKU from a URL (common QR code patterns) */
+  const extractSkuFromUrl = (url: string): string | null => {
+    try {
+      const urlObj = new URL(url);
+      const pathParts = urlObj.pathname.split('/').filter(Boolean);
+
+      // Pattern 1: /g/{SKU}/... — e.g. https://pk.verify.example.com/g/12350301/s/5DBAD0/...
+      const gIdx = pathParts.indexOf('g');
+      if (gIdx !== -1 && gIdx + 1 < pathParts.length) {
+        const candidate = pathParts[gIdx + 1];
+        if (candidate && /^\d+$/.test(candidate)) return candidate;
+      }
+
+      // Pattern 2: Query param — ?sku=XXX, ?code=XXX, ?id=XXX
+      const skuParam = urlObj.searchParams.get('sku')
+        || urlObj.searchParams.get('code')
+        || urlObj.searchParams.get('id');
+      if (skuParam) return skuParam;
+
+      // Pattern 3: Last non-empty path segment — /product/SKU-12345
+      if (pathParts.length > 0) {
+        const last = pathParts[pathParts.length - 1];
+        if (last.length >= 3 && !/^(api|v1|v2|products|items|scan|qr|g|s)$/i.test(last)) {
+          return last;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
 
   const parseBinQR = (data: string): BinInfo | null => {
     try {
@@ -94,6 +129,7 @@ export default function AssignBinScreen() {
   };
 
   const parseItemQR = (data: string): ItemInfo | null => {
+    // 1. Try JSON payload first (e.g., PutAway item QR)
     try {
       const parsed = JSON.parse(data);
       const itemId = parsed.item_id || parsed.id;
@@ -109,10 +145,37 @@ export default function AssignBinScreen() {
           quantity: isNaN(qty) ? 1 : qty,
         };
       }
-      return null;
     } catch {
-      return null;
+      // Not JSON — fall through to URL / plain string handling
     }
+
+    const trimmed = data.trim();
+
+    // 2. Try to parse as URL and extract SKU (common: https://.../product/SKU123)
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const sku = extractSkuFromUrl(trimmed);
+      if (sku) {
+        return {
+          item_id: '', // Will be resolved via lookupItemBySku
+          sku,
+          name: undefined,
+          batch_number: '',
+          quantity: 1,
+        };
+      }
+    }
+
+    // 3. Plain string barcode / SKU
+    if (trimmed.length > 0) {
+      return {
+        item_id: '',
+        sku: trimmed,
+        name: undefined,
+        batch_number: '',
+        quantity: 1,
+      };
+    }
+    return null;
   };
 
   // ============ Handlers ============
@@ -141,10 +204,15 @@ export default function AssignBinScreen() {
       if (lookedUp) {
         parsed.item_id = lookedUp.item_id;
         parsed.name = lookedUp.name;
+      } else {
+        Alert.alert('Not Found', `No item found for SKU: ${parsed.sku}`);
+        return;
       }
     }
 
     setItemInfo(parsed);
+    setEditQty(String(parsed.quantity));
+    setEditBatch(parsed.batch_number || '');
     setError(null);
     setPhase('confirm');
   };
@@ -152,14 +220,20 @@ export default function AssignBinScreen() {
   const handleConfirmAssign = async () => {
     if (!binInfo || !itemInfo || !selectedWarehouse) return;
 
+    const qty = parseFloat(editQty);
+    if (isNaN(qty) || qty <= 0) {
+      Alert.alert('Invalid', 'Please enter a valid quantity.');
+      return;
+    }
+
     setIsAssigning(true);
     setError(null);
     try {
       await binService.addStockToBin({
         bin_location_id: binInfo.bin_location_id,
         item_id: itemInfo.item_id,
-        quantity: itemInfo.quantity,
-        batch_number: itemInfo.batch_number || undefined,
+        quantity: qty,
+        batch_number: editBatch.trim() || undefined,
         warehouse_id: selectedWarehouse.id,
       });
 
@@ -167,7 +241,7 @@ export default function AssignBinScreen() {
         binCode: binInfo.bin_code,
         fullPath: binInfo.full_path,
         sku: itemInfo.sku,
-        qty: itemInfo.quantity,
+        qty,
       });
       setPhase('success');
     } catch (err: any) {
@@ -183,6 +257,8 @@ export default function AssignBinScreen() {
     setBinInfo(null);
     setItemInfo(null);
     setLastAssigned(null);
+    setEditQty('1');
+    setEditBatch('');
     setError(null);
     setPhase('idle');
   };
@@ -190,6 +266,8 @@ export default function AssignBinScreen() {
   const handleCancel = () => {
     setBinInfo(null);
     setItemInfo(null);
+    setEditQty('1');
+    setEditBatch('');
     setError(null);
     setPhase('idle');
   };
@@ -278,11 +356,24 @@ export default function AssignBinScreen() {
           )}
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Batch</Text>
-            <Text style={styles.confirmValue}>{itemInfo.batch_number || 'N/A'}</Text>
+            <TextInput
+              style={styles.confirmInput}
+              value={editBatch}
+              onChangeText={setEditBatch}
+              placeholder="Optional"
+              placeholderTextColor="#667788"
+            />
           </View>
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Quantity</Text>
-            <Text style={styles.confirmValue}>{itemInfo.quantity}</Text>
+            <TextInput
+              style={styles.confirmInput}
+              value={editQty}
+              onChangeText={setEditQty}
+              keyboardType="numeric"
+              placeholder="1"
+              placeholderTextColor="#667788"
+            />
           </View>
         </View>
 
@@ -489,6 +580,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  confirmInput: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    backgroundColor: '#2A3A4A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minWidth: 100,
+    textAlign: 'right',
   },
   confirmActions: {
     flexDirection: 'row',
