@@ -150,6 +150,18 @@ export default function DashboardScreen({ navigation }: any) {
             </Text>
           </TouchableOpacity>
 
+          {/* Assign Bin */}
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => navigation.navigate('AssignBin')}
+          >
+            <Text style={styles.cardIcon}>🏷️</Text>
+            <Text style={styles.cardTitle}>Assign Bin</Text>
+            <Text style={styles.cardDesc}>
+              Scan bin & items to map stock to locations
+            </Text>
+          </TouchableOpacity>
+
           {/* Receiving Slips */}
           <TouchableOpacity
             style={styles.card}

@@ -1,7 +1,8 @@
 // ============================================================
-// Assign Bin Screen — Scan Bin QR + Item QR to assign items
+// Assign Bin Screen — Single scanner, auto-detect bin vs item
+// Flow: idle → scanning → review → submitting → success
 // ============================================================
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,7 +17,7 @@ import { useAuthStore } from '../store/authStore';
 import QrScanner from '../components/QrScanner';
 import * as binService from '../api/binService';
 
-type ScanPhase = 'idle' | 'scanning_bin' | 'scanning_item' | 'confirm' | 'success';
+type ScreenPhase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
 
 interface BinInfo {
   bin_location_id: string;
@@ -26,7 +27,7 @@ interface BinInfo {
   warehouse_name: string;
 }
 
-interface ItemInfo {
+interface ScannedItem {
   item_id: string;
   sku: string;
   name?: string;
@@ -34,342 +35,342 @@ interface ItemInfo {
   quantity: number;
 }
 
+// ============ QR Parsers (pure functions outside component) ============
+
+function extractSkuFromUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(Boolean);
+
+    // /g/{SKU}/... — e.g. https://pk.verify.example.com/g/12350301/s/5DBAD0/...
+    const gIdx = pathParts.indexOf('g');
+    if (gIdx !== -1 && gIdx + 1 < pathParts.length) {
+      const candidate = pathParts[gIdx + 1];
+      if (candidate && /^\d+$/.test(candidate)) return candidate;
+    }
+
+    // Query param — ?sku=XXX, ?code=XXX, ?id=XXX
+    const skuParam =
+      urlObj.searchParams.get('sku') ||
+      urlObj.searchParams.get('code') ||
+      urlObj.searchParams.get('id');
+    if (skuParam) return skuParam;
+
+    // Last path segment — /product/SKU-12345
+    if (pathParts.length > 0) {
+      const last = pathParts[pathParts.length - 1];
+      if (last.length >= 3 && !/^(api|v1|v2|products|items|scan|qr|g|s)$/i.test(last)) {
+        return last;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseBinQR(data: string): BinInfo | null {
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed.type === 'location' && parsed.location_id && parsed.location_code) {
+      return {
+        bin_location_id: parsed.location_id,
+        bin_code: parsed.location_code,
+        full_path: parsed.full_path || parsed.location_code,
+        warehouse_id: parsed.warehouse_id || '',
+        warehouse_name: parsed.warehouse_name || '',
+      };
+    }
+    const binId = parsed.bin_id || parsed.bin_location_id || parsed.id;
+    const binCode = parsed.bin_code || parsed.code || parsed.location;
+    if (binId && binCode) {
+      return { bin_location_id: binId, bin_code: binCode, full_path: binCode, warehouse_id: '', warehouse_name: '' };
+    }
+    return null;
+  } catch {
+    if (data.trim().length > 0) {
+      return { bin_location_id: data.trim(), bin_code: data.trim(), full_path: data.trim(), warehouse_id: '', warehouse_name: '' };
+    }
+    return null;
+  }
+}
+
+function parseItemQR(data: string): { item_id: string; sku: string; name?: string; batch_number: string; quantity: number } | null {
+  // 1. JSON payload
+  try {
+    const parsed = JSON.parse(data);
+    const itemId = parsed.item_id || parsed.id;
+    const sku = parsed.sku || parsed.code || '';
+    const batch = parsed.batch || parsed.batch_number || parsed.batch_no || '';
+    const qty = parseFloat(parsed.qty || parsed.quantity || '1');
+    if (sku) {
+      return { item_id: itemId || '', sku, name: parsed.name || parsed.product_name, batch_number: batch, quantity: isNaN(qty) ? 1 : qty };
+    }
+  } catch { /* not JSON */ }
+
+  const trimmed = data.trim();
+
+  // 2. URL → extract SKU
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    const sku = extractSkuFromUrl(trimmed);
+    if (sku) return { item_id: '', sku, batch_number: '', quantity: 1 };
+  }
+
+  // 3. Plain string
+  if (trimmed.length > 0) {
+    return { item_id: '', sku: trimmed, batch_number: '', quantity: 1 };
+  }
+  return null;
+}
+
+// ============ Component ============
+
 export default function AssignBinScreen() {
   const { selectedWarehouse } = useAuthStore();
 
-  const [phase, setPhase] = useState<ScanPhase>('idle');
+  const [phase, setPhase] = useState<ScreenPhase>('idle');
   const [binInfo, setBinInfo] = useState<BinInfo | null>(null);
-  const [itemInfo, setItemInfo] = useState<ItemInfo | null>(null);
-  const [isAssigning, setIsAssigning] = useState(false);
-  const [lastAssigned, setLastAssigned] = useState<{
-    binCode: string;
-    fullPath: string;
-    sku: string;
-    qty: number;
-  } | null>(null);
+  const [items, setItems] = useState<ScannedItem[]>([]);
+  const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editQty, setEditQty] = useState('1');
-  const [editBatch, setEditBatch] = useState('');
+  const [batchInput, setBatchInput] = useState('');
+  const [qtyInput, setQtyInput] = useState('1');
+  const [successSummary, setSuccessSummary] = useState<{ binCode: string; fullPath: string; itemCount: number } | null>(null);
 
-  // ============ QR Parsing ============
+  const binLocked = binInfo !== null;
 
-  /** Extract a likely SKU from a URL (common QR code patterns) */
-  const extractSkuFromUrl = (url: string): string | null => {
-    try {
-      const urlObj = new URL(url);
-      const pathParts = urlObj.pathname.split('/').filter(Boolean);
+  // ============ Safe error extractor ============
 
-      // Pattern 1: /g/{SKU}/... — e.g. https://pk.verify.example.com/g/12350301/s/5DBAD0/...
-      const gIdx = pathParts.indexOf('g');
-      if (gIdx !== -1 && gIdx + 1 < pathParts.length) {
-        const candidate = pathParts[gIdx + 1];
-        if (candidate && /^\d+$/.test(candidate)) return candidate;
-      }
+  const getErrorMessage = (err: any): string => {
+    const detail = err?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (typeof detail === 'object' && detail !== null) {
+      return detail.message || detail.error || JSON.stringify(detail);
+    }
+    if (typeof err?.message === 'string') return err.message;
+    return 'Something went wrong. Please try again.';
+  };
 
-      // Pattern 2: Query param — ?sku=XXX, ?code=XXX, ?id=XXX
-      const skuParam = urlObj.searchParams.get('sku')
-        || urlObj.searchParams.get('code')
-        || urlObj.searchParams.get('id');
-      if (skuParam) return skuParam;
+  // ============ Scanner handler — auto-detect bin vs item ============
 
-      // Pattern 3: Last non-empty path segment — /product/SKU-12345
-      if (pathParts.length > 0) {
-        const last = pathParts[pathParts.length - 1];
-        if (last.length >= 3 && !/^(api|v1|v2|products|items|scan|qr|g|s)$/i.test(last)) {
-          return last;
+  const handleScan = useCallback(
+    async (data: string) => {
+      setError(null);
+
+      // Try bin first
+      const bin = parseBinQR(data);
+      if (bin) {
+        if (binLocked) {
+          Alert.alert('Bin Already Set', `Bin ${binInfo!.bin_code} is locked. Tap "Review" to change it.`);
+          return;
         }
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
-
-  const parseBinQR = (data: string): BinInfo | null => {
-    try {
-      const parsed = JSON.parse(data);
-
-      // New format: { type: "location", location_id, location_code, full_path, ... }
-      if (parsed.type === 'location' && parsed.location_id && parsed.location_code) {
-        return {
-          bin_location_id: parsed.location_id,
-          bin_code: parsed.location_code,
-          full_path: parsed.full_path || parsed.location_code,
-          warehouse_id: parsed.warehouse_id || '',
-          warehouse_name: parsed.warehouse_name || '',
-        };
-      }
-
-      // Legacy format fallback
-      const binId = parsed.bin_id || parsed.bin_location_id || parsed.id;
-      const binCode = parsed.bin_code || parsed.code || parsed.location;
-      if (binId && binCode) {
-        return {
-          bin_location_id: binId,
-          bin_code: binCode,
-          full_path: binCode,
-          warehouse_id: '',
-          warehouse_name: '',
-        };
-      }
-      return null;
-    } catch {
-      // Treat raw string as bin code
-      if (data.trim().length > 0) {
-        return {
-          bin_location_id: data.trim(),
-          bin_code: data.trim(),
-          full_path: data.trim(),
-          warehouse_id: '',
-          warehouse_name: '',
-        };
-      }
-      return null;
-    }
-  };
-
-  const parseItemQR = (data: string): ItemInfo | null => {
-    // 1. Try JSON payload first (e.g., PutAway item QR)
-    try {
-      const parsed = JSON.parse(data);
-      const itemId = parsed.item_id || parsed.id;
-      const sku = parsed.sku || parsed.code || '';
-      const batch = parsed.batch || parsed.batch_number || parsed.batch_no || '';
-      const qty = parseFloat(parsed.qty || parsed.quantity || '1');
-      if (sku) {
-        return {
-          item_id: itemId || '',
-          sku,
-          name: parsed.name || parsed.product_name || undefined,
-          batch_number: batch,
-          quantity: isNaN(qty) ? 1 : qty,
-        };
-      }
-    } catch {
-      // Not JSON — fall through to URL / plain string handling
-    }
-
-    const trimmed = data.trim();
-
-    // 2. Try to parse as URL and extract SKU (common: https://.../product/SKU123)
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      const sku = extractSkuFromUrl(trimmed);
-      if (sku) {
-        return {
-          item_id: '', // Will be resolved via lookupItemBySku
-          sku,
-          name: undefined,
-          batch_number: '',
-          quantity: 1,
-        };
-      }
-    }
-
-    // 3. Plain string barcode / SKU
-    if (trimmed.length > 0) {
-      return {
-        item_id: '',
-        sku: trimmed,
-        name: undefined,
-        batch_number: '',
-        quantity: 1,
-      };
-    }
-    return null;
-  };
-
-  // ============ Handlers ============
-
-  const handleBinScan = (data: string) => {
-    const parsed = parseBinQR(data);
-    if (!parsed) {
-      Alert.alert('Invalid QR', 'Could not read bin info. Try again.');
-      return;
-    }
-    setBinInfo(parsed);
-    setError(null);
-    setPhase('scanning_item');
-  };
-
-  const handleItemScan = async (data: string) => {
-    const parsed = parseItemQR(data);
-    if (!parsed || !parsed.sku) {
-      Alert.alert('Invalid QR', 'Could not read item info. Try again.');
-      return;
-    }
-
-    // If item_id is missing, try to look it up by SKU
-    if (!parsed.item_id && selectedWarehouse) {
-      const lookedUp = await binService.lookupItemBySku(parsed.sku, selectedWarehouse.id);
-      if (lookedUp) {
-        parsed.item_id = lookedUp.item_id;
-        parsed.name = lookedUp.name;
-      } else {
-        Alert.alert('Not Found', `No item found for SKU: ${parsed.sku}`);
+        setBinInfo(bin);
+        setLastScanned(`📍 Bin: ${bin.bin_code}`);
         return;
       }
-    }
 
-    setItemInfo(parsed);
-    setEditQty(String(parsed.quantity));
-    setEditBatch(parsed.batch_number || '');
+      // Try item
+      const parsed = parseItemQR(data);
+      if (!parsed || !parsed.sku) {
+        Alert.alert('Unknown QR', 'Could not recognize this QR code.');
+        return;
+      }
+
+      // Resolve item_id if missing
+      if (!parsed.item_id && selectedWarehouse) {
+        const lookedUp = await binService.lookupItemBySku(parsed.sku, selectedWarehouse.id);
+        if (lookedUp) {
+          parsed.item_id = lookedUp.item_id;
+          parsed.name = parsed.name || lookedUp.name;
+        } else {
+          Alert.alert('Not Found', `No item found for SKU: ${parsed.sku}`);
+          return;
+        }
+      }
+
+      // Use global batch/qty inputs
+      const finalItem: ScannedItem = {
+        ...parsed,
+        batch_number: batchInput.trim() || parsed.batch_number,
+        quantity: parseFloat(qtyInput) || parsed.quantity || 1,
+      };
+
+      setItems((prev) => [...prev, finalItem]);
+      setLastScanned(`📦 ${finalItem.sku}${finalItem.name ? ` — ${finalItem.name}` : ''} ×${finalItem.quantity}`);
+    },
+    [binLocked, binInfo, selectedWarehouse, batchInput, qtyInput]
+  );
+
+  // ============ Actions ============
+
+  const handleStartScan = () => {
+    setBinInfo(null);
+    setItems([]);
+    setLastScanned(null);
     setError(null);
-    setPhase('confirm');
+    setBatchInput('');
+    setQtyInput('1');
+    setPhase('scanning');
   };
 
-  const handleConfirmAssign = async () => {
-    if (!binInfo || !itemInfo || !selectedWarehouse) return;
+  const handleGoToReview = () => {
+    setPhase('review');
+  };
 
-    const qty = parseFloat(editQty);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Invalid', 'Please enter a valid quantity.');
+  const handleChangeBin = () => {
+    // Keep items, clear bin, go back to scanning
+    setBinInfo(null);
+    setPhase('scanning');
+  };
+
+  const handleRemoveItem = (index: number) => {
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleComplete = async () => {
+    if (!binInfo || items.length === 0) return;
+
+    setPhase('submitting');
+    setError(null);
+
+    const failed: string[] = [];
+
+    for (const item of items) {
+      try {
+        await binService.addStockToBin({
+          bin_id: binInfo.bin_location_id,
+          item_id: item.item_id,
+          quantity: item.quantity,
+          batch_number: item.batch_number || undefined,
+        });
+      } catch (err: any) {
+        failed.push(`${item.sku}: ${getErrorMessage(err)}`);
+      }
+    }
+
+    if (failed.length > 0) {
+      setError(`Some items failed:\n${failed.join('\n')}`);
+      setPhase('review');
       return;
     }
 
-    setIsAssigning(true);
-    setError(null);
-    try {
-      await binService.addStockToBin({
-        bin_location_id: binInfo.bin_location_id,
-        item_id: itemInfo.item_id,
-        quantity: qty,
-        batch_number: editBatch.trim() || undefined,
-        warehouse_id: selectedWarehouse.id,
-      });
-
-      setLastAssigned({
-        binCode: binInfo.bin_code,
-        fullPath: binInfo.full_path,
-        sku: itemInfo.sku,
-        qty,
-      });
-      setPhase('success');
-    } catch (err: any) {
-      const detail = err.response?.data?.detail || err.message || 'Failed to assign item to bin.';
-      setError(detail);
-      Alert.alert('Error', detail);
-    } finally {
-      setIsAssigning(false);
-    }
+    setSuccessSummary({
+      binCode: binInfo.bin_code,
+      fullPath: binInfo.full_path,
+      itemCount: items.length,
+    });
+    setPhase('success');
   };
 
-  const handleAssignAnother = () => {
+  const handleNewSession = () => {
     setBinInfo(null);
-    setItemInfo(null);
-    setLastAssigned(null);
-    setEditQty('1');
-    setEditBatch('');
+    setItems([]);
+    setLastScanned(null);
     setError(null);
+    setBatchInput('');
+    setQtyInput('1');
+    setSuccessSummary(null);
     setPhase('idle');
   };
 
-  const handleCancel = () => {
-    setBinInfo(null);
-    setItemInfo(null);
-    setEditQty('1');
-    setEditBatch('');
-    setError(null);
-    setPhase('idle');
-  };
+  // ============ RENDER: Idle ============
 
-  // ============ RENDER: Scanning Bin ============
-  if (phase === 'scanning_bin') {
+  if (phase === 'idle') {
     return (
       <View style={styles.container}>
-        <QrScanner
-          onScan={handleBinScan}
-          title="Scan Bin QR"
-          subtitle="Scan the QR code on the bin/shelf"
-        />
-        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ============ RENDER: Scanning Item ============
-  if (phase === 'scanning_item') {
-    return (
-      <View style={styles.container}>
-        {/* Bin info bar */}
-        {binInfo && (
-          <View style={styles.selectedBar}>
-            <View>
-              <Text style={styles.selectedLabel}>Bin</Text>
-              <Text style={styles.selectedValue}>{binInfo.bin_code}</Text>
-              {binInfo.full_path !== binInfo.bin_code && (
-                <Text style={styles.selectedPath}>{binInfo.full_path}</Text>
-              )}
-              {binInfo.warehouse_name ? (
-                <Text style={styles.selectedWarehouse}>{binInfo.warehouse_name}</Text>
-              ) : null}
-            </View>
-          </View>
-        )}
-        <QrScanner
-          onScan={handleItemScan}
-          title="Scan Item QR"
-          subtitle={binInfo ? `Assigning to: ${binInfo.bin_code}` : 'Scan the item to assign'}
-        />
-        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ============ RENDER: Confirm ============
-  if (phase === 'confirm' && binInfo && itemInfo) {
-    return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.confirmContent}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Confirm Assignment</Text>
+          <Text style={styles.headerTitle}>Assign Bin</Text>
+          <Text style={styles.headerSubtitle}>Scan bin & items to map stock to a location</Text>
         </View>
 
-        <View style={styles.confirmCard}>
-          <View style={styles.confirmRow}>
-            <Text style={styles.confirmLabel}>Bin</Text>
-            <Text style={styles.confirmValue}>{binInfo.bin_code}</Text>
+        <View style={styles.idleContent}>
+          <View style={styles.instructionCard}>
+            <Text style={styles.instructionStep}>1</Text>
+            <Text style={styles.instructionText}>Tap Start Scan</Text>
           </View>
-          {binInfo.full_path !== binInfo.bin_code && (
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Path</Text>
-              <Text style={styles.confirmValue}>{binInfo.full_path}</Text>
-            </View>
-          )}
-          {binInfo.warehouse_name ? (
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Warehouse</Text>
-              <Text style={styles.confirmValue}>{binInfo.warehouse_name}</Text>
-            </View>
-          ) : null}
-          <View style={styles.confirmRow}>
-            <Text style={styles.confirmLabel}>Item</Text>
-            <Text style={styles.confirmValue}>{itemInfo.sku}</Text>
+          <View style={styles.instructionCard}>
+            <Text style={styles.instructionStep}>2</Text>
+            <Text style={styles.instructionText}>Scan the bin QR (auto-detected)</Text>
           </View>
-          {itemInfo.name && (
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Name</Text>
-              <Text style={styles.confirmValue}>{itemInfo.name}</Text>
-            </View>
-          )}
-          <View style={styles.confirmRow}>
-            <Text style={styles.confirmLabel}>Batch</Text>
+          <View style={styles.instructionCard}>
+            <Text style={styles.instructionStep}>3</Text>
+            <Text style={styles.instructionText}>Scan items — keep scanning to add more</Text>
+          </View>
+          <View style={styles.instructionCard}>
+            <Text style={styles.instructionStep}>4</Text>
+            <Text style={styles.instructionText}>Tap Review → Complete to finish</Text>
+          </View>
+
+          <TouchableOpacity style={styles.primaryButton} onPress={handleStartScan}>
+            <Text style={styles.primaryButtonText}>Start Scan</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ============ RENDER: Scanning ============
+
+  if (phase === 'scanning') {
+    return (
+      <View style={styles.container}>
+        {/* Status bar */}
+        <View style={styles.statusBar}>
+          <View style={styles.statusLeft}>
+            <Text style={styles.statusLabel}>
+              {binLocked ? '🔒 Bin locked' : '📱 Waiting for bin'}
+            </Text>
+            {binInfo && (
+              <>
+                <Text style={styles.statusBinCode}>{binInfo.bin_code}</Text>
+                {binInfo.full_path !== binInfo.bin_code && (
+                  <Text style={styles.statusPath}>{binInfo.full_path}</Text>
+                )}
+              </>
+            )}
+          </View>
+          <View style={styles.statusRight}>
+            <Text style={styles.statusCount}>{items.length}</Text>
+            <Text style={styles.statusCountLabel}>items</Text>
+          </View>
+        </View>
+
+        {/* Scanner */}
+        <QrScanner
+          onScan={handleScan}
+          title={binLocked ? 'Scan Items' : 'Scan Bin or Item'}
+          subtitle={
+            binLocked
+              ? `Assigning to ${binInfo!.bin_code} • ${items.length} item(s) scanned`
+              : 'Scan a bin QR first, or scan items'
+          }
+        />
+
+        {/* Last scan toast */}
+        {lastScanned && (
+          <View style={styles.toast}>
+            <Text style={styles.toastText}>{lastScanned}</Text>
+          </View>
+        )}
+
+        {/* Quick inputs (batch + qty) */}
+        <View style={styles.quickInputs}>
+          <View style={styles.quickInputGroup}>
+            <Text style={styles.quickInputLabel}>Batch</Text>
             <TextInput
-              style={styles.confirmInput}
-              value={editBatch}
-              onChangeText={setEditBatch}
+              style={styles.quickInput}
+              value={batchInput}
+              onChangeText={setBatchInput}
               placeholder="Optional"
               placeholderTextColor="#667788"
             />
           </View>
-          <View style={styles.confirmRow}>
-            <Text style={styles.confirmLabel}>Quantity</Text>
+          <View style={styles.quickInputGroup}>
+            <Text style={styles.quickInputLabel}>Qty</Text>
             <TextInput
-              style={styles.confirmInput}
-              value={editQty}
-              onChangeText={setEditQty}
+              style={[styles.quickInput, styles.quickInputNarrow]}
+              value={qtyInput}
+              onChangeText={setQtyInput}
               keyboardType="numeric"
               placeholder="1"
               placeholderTextColor="#667788"
@@ -377,93 +378,153 @@ export default function AssignBinScreen() {
           </View>
         </View>
 
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <View style={styles.confirmActions}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleCancel}>
+        {/* Bottom actions */}
+        <View style={styles.bottomActions}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleNewSession}>
             <Text style={styles.secondaryButtonText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.primaryButton, isAssigning && styles.buttonDisabled]}
-            onPress={handleConfirmAssign}
-            disabled={isAssigning}
+            style={[styles.primaryButton, items.length === 0 && styles.buttonDisabled]}
+            onPress={handleGoToReview}
+            disabled={items.length === 0}
           >
-            {isAssigning ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Confirm Assign</Text>
+            <Text style={styles.primaryButtonText}>
+              Review ({items.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ============ RENDER: Review ============
+
+  if (phase === 'review') {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.reviewContent}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Review Assignment</Text>
+        </View>
+
+        {/* Bin card */}
+        {binInfo && (
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewSectionTitle}>Bin</Text>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Code</Text>
+              <Text style={styles.reviewValue}>{binInfo.bin_code}</Text>
+            </View>
+            {binInfo.full_path !== binInfo.bin_code && (
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Path</Text>
+                <Text style={styles.reviewValue}>{binInfo.full_path}</Text>
+              </View>
             )}
+            {binInfo.warehouse_name ? (
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Warehouse</Text>
+                <Text style={styles.reviewValue}>{binInfo.warehouse_name}</Text>
+              </View>
+            ) : null}
+            <TouchableOpacity style={styles.linkButton} onPress={handleChangeBin}>
+              <Text style={styles.linkButtonText}>🔄 Change Bin</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Items list */}
+        <View style={styles.reviewCard}>
+          <Text style={styles.reviewSectionTitle}>
+            Items ({items.length})
+          </Text>
+          {items.length === 0 ? (
+            <Text style={styles.emptyText}>No items scanned yet.</Text>
+          ) : (
+            items.map((item, i) => (
+              <View key={i} style={styles.itemRow}>
+                <View style={styles.itemInfo}>
+                  <Text style={styles.itemSku}>{item.sku}</Text>
+                  {item.name && <Text style={styles.itemName}>{item.name}</Text>}
+                  <View style={styles.itemMeta}>
+                    <Text style={styles.itemMetaText}>Qty: {item.quantity}</Text>
+                    {item.batch_number ? (
+                      <Text style={styles.itemMetaText}>Batch: {item.batch_number}</Text>
+                    ) : null}
+                  </View>
+                </View>
+                <TouchableOpacity style={styles.removeButton} onPress={() => handleRemoveItem(i)}>
+                  <Text style={styles.removeButtonText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </View>
+
+        {error && <Text style={styles.errorText}>{error}</Text>}
+
+        {/* Actions */}
+        <View style={styles.reviewActions}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setPhase('scanning')}>
+            <Text style={styles.secondaryButtonText}>← Back to Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.primaryButton, (!binInfo || items.length === 0) && styles.buttonDisabled]}
+            onPress={handleComplete}
+            disabled={!binInfo || items.length === 0}
+          >
+            <Text style={styles.primaryButtonText}>
+              Complete ({items.length} items)
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
     );
   }
 
-  // ============ RENDER: Success ============
-  if (phase === 'success' && lastAssigned) {
+  // ============ RENDER: Submitting ============
+
+  if (phase === 'submitting') {
     return (
       <View style={styles.container}>
-        <View style={styles.successContent}>
+        <View style={styles.centeredContent}>
+          <ActivityIndicator size="large" color="#1A73E8" />
+          <Text style={styles.centeredTitle}>Assigning items to bin...</Text>
+          <Text style={styles.centeredSubtitle}>
+            {items.length} item(s) → {binInfo?.bin_code}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // ============ RENDER: Success ============
+
+  if (phase === 'success' && successSummary) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.centeredContent}>
           <Text style={styles.successIcon}>✅</Text>
-          <Text style={styles.successTitle}>Assigned!</Text>
+          <Text style={styles.centeredTitle}>Assignment Complete!</Text>
           <View style={styles.successCard}>
             <Text style={styles.successDetail}>
-              {lastAssigned.sku} × {lastAssigned.qty}
+              {successSummary.itemCount} item(s)
             </Text>
-            <Text style={styles.successDetail}>→ Bin: {lastAssigned.binCode}</Text>
-            {lastAssigned.fullPath !== lastAssigned.binCode && (
-              <Text style={styles.successPath}>{lastAssigned.fullPath}</Text>
+            <Text style={styles.successDetail}>
+              → Bin: {successSummary.binCode}
+            </Text>
+            {successSummary.fullPath !== successSummary.binCode && (
+              <Text style={styles.successPath}>{successSummary.fullPath}</Text>
             )}
           </View>
-          <TouchableOpacity style={styles.primaryButton} onPress={handleAssignAnother}>
-            <Text style={styles.primaryButtonText}>Assign Another</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNewSession}>
+            <Text style={styles.primaryButtonText}>New Session</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // ============ RENDER: Idle ============
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Assign Bin</Text>
-        <Text style={styles.headerSubtitle}>
-          Scan a bin QR and an item QR to map them
-        </Text>
-      </View>
-
-      <View style={styles.idleContent}>
-        <View style={styles.instructionCard}>
-          <Text style={styles.instructionStep}>1</Text>
-          <Text style={styles.instructionText}>
-            Scan the bin QR code first
-          </Text>
-        </View>
-        <View style={styles.instructionCard}>
-          <Text style={styles.instructionStep}>2</Text>
-          <Text style={styles.instructionText}>
-            Then scan the item QR code
-          </Text>
-        </View>
-        <View style={styles.instructionCard}>
-          <Text style={styles.instructionStep}>3</Text>
-          <Text style={styles.instructionText}>
-            Confirm the assignment
-          </Text>
-        </View>
-
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => setPhase('scanning_bin')}
-        >
-          <Text style={styles.primaryButtonText}>Start — Scan Bin QR</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  return null;
 }
 
 // ============ STYLES ============
@@ -490,7 +551,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // Idle
+  // ---- Idle ----
   idleContent: {
     padding: 24,
     gap: 16,
@@ -523,96 +584,228 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Scanning bar
-  selectedBar: {
+  // ---- Scanning ----
+  statusBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     backgroundColor: '#1A2332',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    gap: 10,
   },
-  selectedLabel: {
+  statusLeft: {
+    flex: 1,
+  },
+  statusLabel: {
     color: '#1A73E8',
     fontSize: 12,
     fontWeight: '600',
+    marginBottom: 2,
   },
-  selectedValue: {
+  statusBinCode: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  selectedPath: {
+  statusPath: {
     color: '#8899AA',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  selectedWarehouse: {
-    color: '#1A73E8',
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 1,
+  },
+  statusRight: {
+    alignItems: 'center',
+    backgroundColor: '#1A73E8',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginLeft: 12,
+  },
+  statusCount: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  statusCountLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    textTransform: 'uppercase',
   },
 
-  // Confirm
-  confirmContent: {
+  toast: {
+    position: 'absolute',
+    bottom: 180,
+    left: 24,
+    right: 24,
+    backgroundColor: '#1A73E8',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  quickInputs: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    gap: 12,
+    backgroundColor: '#0F1923',
+  },
+  quickInputGroup: {
+    flex: 1,
+  },
+  quickInputLabel: {
+    color: '#8899AA',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  quickInput: {
+    backgroundColor: '#1A2332',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  quickInputNarrow: {
+    maxWidth: 80,
+  },
+
+  bottomActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    gap: 12,
+  },
+
+  // ---- Review ----
+  reviewContent: {
     paddingBottom: 40,
   },
-  confirmCard: {
+  reviewCard: {
     backgroundColor: '#1A2332',
     borderRadius: 12,
     padding: 20,
     margin: 24,
+    marginBottom: 0,
     borderWidth: 1,
     borderColor: '#2A3A4A',
   },
-  confirmRow: {
+  reviewSectionTitle: {
+    color: '#1A73E8',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  reviewRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#2A3A4A',
   },
-  confirmLabel: {
+  reviewLabel: {
     color: '#8899AA',
     fontSize: 14,
   },
-  confirmValue: {
+  reviewValue: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
-  confirmInput: {
-    color: '#fff',
+  linkButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  linkButtonText: {
+    color: '#1A73E8',
     fontSize: 14,
     fontWeight: '600',
-    backgroundColor: '#2A3A4A',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    minWidth: 100,
-    textAlign: 'right',
   },
-  confirmActions: {
+
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemSku: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  itemName: {
+    color: '#8899AA',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  itemMeta: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  itemMetaText: {
+    color: '#667788',
+    fontSize: 11,
+  },
+  removeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#3A1A1A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  emptyText: {
+    color: '#667788',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+
+  reviewActions: {
     flexDirection: 'row',
     paddingHorizontal: 24,
+    paddingTop: 24,
     gap: 12,
   },
 
-  // Success
-  successContent: {
+  // ---- Submitting / Success / Centered ----
+  centeredContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
     gap: 16,
   },
+  centeredTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  centeredSubtitle: {
+    color: '#8899AA',
+    fontSize: 14,
+  },
   successIcon: {
     fontSize: 56,
-  },
-  successTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '700',
   },
   successCard: {
     backgroundColor: '#1A2332',
@@ -622,64 +815,53 @@ const styles = StyleSheet.create({
     borderColor: '#1A73E8',
     width: '100%',
     gap: 4,
+    alignItems: 'center',
   },
   successDetail: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
   },
   successPath: {
     color: '#8899AA',
     fontSize: 12,
-    textAlign: 'center',
     marginTop: 2,
   },
 
-  // Shared buttons
+  // ---- Shared ----
   primaryButton: {
     backgroundColor: '#1A73E8',
     borderRadius: 10,
     paddingVertical: 16,
+    paddingHorizontal: 24,
     alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
+    flex: 1,
   },
   primaryButtonText: {
     color: '#fff',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
-    flex: 1,
     backgroundColor: '#2A3A4A',
     borderRadius: 10,
     paddingVertical: 16,
+    paddingHorizontal: 20,
     alignItems: 'center',
   },
   secondaryButtonText: {
     color: '#B0C4D8',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
   },
-  cancelButton: {
-    backgroundColor: '#2A3A4A',
-    paddingVertical: 14,
-    alignItems: 'center',
-    margin: 16,
-    borderRadius: 10,
-  },
-  cancelText: {
-    color: '#8899AA',
-    fontSize: 15,
-    fontWeight: '500',
+  buttonDisabled: {
+    opacity: 0.5,
   },
   errorText: {
     color: '#EF4444',
     fontSize: 13,
     textAlign: 'center',
+    marginHorizontal: 24,
     marginTop: 12,
-    paddingHorizontal: 24,
   },
 });
