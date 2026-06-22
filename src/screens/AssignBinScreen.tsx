@@ -271,25 +271,8 @@ export default function AssignBinScreen() {
         </View>
 
         <View style={styles.idleContent}>
-          <View style={styles.instructionCard}>
-            <Text style={styles.instructionStep}>1</Text>
-            <Text style={styles.instructionText}>Tap Start Scan</Text>
-          </View>
-          <View style={styles.instructionCard}>
-            <Text style={styles.instructionStep}>2</Text>
-            <Text style={styles.instructionText}>Scan the bin QR (auto-detected)</Text>
-          </View>
-          <View style={styles.instructionCard}>
-            <Text style={styles.instructionStep}>3</Text>
-            <Text style={styles.instructionText}>Scan items — keep scanning to add more</Text>
-          </View>
-          <View style={styles.instructionCard}>
-            <Text style={styles.instructionStep}>4</Text>
-            <Text style={styles.instructionText}>Tap Review → Complete to finish</Text>
-          </View>
-
-          <TouchableOpacity style={styles.primaryButton} onPress={handleStartScan}>
-            <Text style={styles.primaryButtonText}>Start Scan</Text>
+          <TouchableOpacity style={styles.scanButton} onPress={handleStartScan}>
+            <Text style={styles.scanButtonText}>Scan</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -500,35 +483,26 @@ const styles = StyleSheet.create({
 
   // ---- Idle ----
   idleContent: {
-    padding: 24,
-    gap: 16,
-  },
-  instructionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1A2332',
-    borderRadius: 12,
-    padding: 16,
-    gap: 14,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  instructionStep: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#1A73E8',
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 32,
-    overflow: 'hidden',
-  },
-  instructionText: {
-    color: '#B0C4D8',
-    fontSize: 15,
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanButton: {
+    width: 320,
+    height:60,
+    borderRadius: 10,
+    backgroundColor: '#1A73E8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanButtonIcon: {
+    fontSize: 56,
+    marginBottom: 4,
+  },
+  scanButtonText: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '700',
   },
 
   // ---- Scanning ----
