@@ -535,10 +535,11 @@ const styles = StyleSheet.create({
   statusBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: '#1A2332',
     paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingTop: 55,
+    paddingBottom: 12,
   },
   statusLeft: {
     flex: 1,
@@ -551,19 +552,19 @@ const styles = StyleSheet.create({
   statusRight: {
     alignItems: 'center',
     backgroundColor: '#1A73E8',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     marginLeft: 12,
   },
   statusCount: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 16,
     fontWeight: '700',
   },
   statusCountLabel: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 10,
+    fontSize: 9,
     textTransform: 'uppercase',
   },
 

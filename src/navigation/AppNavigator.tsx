@@ -97,7 +97,7 @@ function AppTabs() {
         options={{
           tabBarLabel: 'Assign Bin',
           tabBarIcon: ({ color }) => (
-            <TabIcon label="🏷️" color={color} />
+            <TabIcon label="📦" color={color} />
           ),
         }}
       />
