@@ -11,7 +11,8 @@ export async function generatePutAwayFromSlip(
 ): Promise<PutAwayList> {
   const { data } = await coreClient.post<PutAwayList>(
     `/put-away/generate-from-slip/${slipId}`,
-    workerId ? { worker_id: workerId } : {}
+    workerId ? { worker_id: workerId } : {},
+    { timeout: 60000 } // 60 seconds — put-away generation can be slow
   );
   return data;
 }
@@ -19,6 +20,7 @@ export async function generatePutAwayFromSlip(
 // ---------- List Put-Away Lists ----------
 export async function getPutAwayLists(params?: {
   warehouse_id?: string;
+  receiving_slip_id?: string;
   status?: 'pending' | 'completed';
   page?: number;
   page_size?: number;

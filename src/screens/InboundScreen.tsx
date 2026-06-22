@@ -11,16 +11,14 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Modal,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import QrScanner from '../components/QrScanner';
 import * as inboundService from '../api/inboundService';
-import * as putawayService from '../api/putawayService';
-import type { SessionSummary, ReceivingSlip, PutAwayList } from '../types';
+import type { SessionSummary, ReceivingSlip } from '../types';
 
-type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated' | 'putaway_generated';
+type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
 export default function InboundScreen({ navigation }: any) {
   const { selectedWarehouse } = useAuthStore();
@@ -42,11 +40,6 @@ export default function InboundScreen({ navigation }: any) {
 
   const [step, setStep] = useState<Step>('idle');
   const [dockLocation, setDockLocation] = useState('');
-
-  // Put-away generation state
-  const [generatingPutaway, setGeneratingPutaway] = useState(false);
-  const [generatedPutaway, setGeneratedPutaway] = useState<PutAwayList | null>(null);
-  const [putawayError, setPutawayError] = useState<string | null>(null);
 
   // Sync step with store state
   useEffect(() => {
@@ -73,8 +66,6 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
     try {
-      setGeneratedPutaway(null);
-      setPutawayError(null);
       await startSession(selectedWarehouse.id, dockLocation.trim());
       setStep('scanning');
     } catch (err: any) {
@@ -120,38 +111,9 @@ export default function InboundScreen({ navigation }: any) {
     );
   };
 
-  const handleGeneratePutaway = async () => {
-    if (!generatedSlip) return;
-    setGeneratingPutaway(true);
-    setPutawayError(null);
-    try {
-      const workerId = useAuthStore.getState().worker?.id;
-      const putaway = await putawayService.generatePutAwayFromSlip(
-        generatedSlip.id,
-        workerId
-      );
-      setGeneratedPutaway(putaway);
-      setStep('putaway_generated');
-      // Also approve the receiving slip
-      try {
-        await inboundService.approveReceivingSlip(generatedSlip.id, workerId);
-      } catch {
-        // Approval may have happened already during put-away generation
-      }
-    } catch (err: any) {
-      const detail = err.response?.data?.detail || 'Failed to generate put-away.';
-      setPutawayError(detail);
-      Alert.alert('Error', detail);
-    } finally {
-      setGeneratingPutaway(false);
-    }
-  };
-
   const handleNewSession = () => {
     clearSession();
     setDockLocation('');
-    setGeneratedPutaway(null);
-    setPutawayError(null);
     setStep('idle');
   };
 
@@ -300,8 +262,8 @@ export default function InboundScreen({ navigation }: any) {
     );
   }
 
-  // ============ RENDER: SLIP GENERATED / PUTAWAY GENERATED ============
-  if ((step === 'slip_generated' || step === 'putaway_generated') && generatedSlip) {
+  // ============ RENDER: SLIP GENERATED ============
+  if (step === 'slip_generated' && generatedSlip) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.resultContent}>
         <View style={styles.successBanner}>
@@ -329,57 +291,14 @@ export default function InboundScreen({ navigation }: any) {
           ))}
         </View>
 
-        {/* Put-Away Section */}
-        {step === 'slip_generated' && !generatedPutaway && (
-          <View style={styles.putawaySection}>
-            <Text style={styles.putawayTitle}>Create Put-Away List</Text>
-            <Text style={styles.putawayDesc}>
-              Generate a put-away list to assign stock to bin locations.
-            </Text>
-            {putawayError && (
-              <Text style={styles.putawayError}>{putawayError}</Text>
-            )}
-            <TouchableOpacity
-              style={[styles.primaryButton, generatingPutaway && styles.buttonDisabled]}
-              onPress={handleGeneratePutaway}
-              disabled={generatingPutaway}
-            >
-              {generatingPutaway ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Generate Put-Away List</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Generated Put-Away */}
-        {generatedPutaway && (
-          <View style={styles.putawayResult}>
-            <Text style={styles.putawayResultTitle}>Put-Away List Generated</Text>
-            <Text style={styles.putawayListNo}>{generatedPutaway.put_away_list_no}</Text>
-            <Text style={styles.putawayStatus}>Status: {generatedPutaway.status}</Text>
-
-            {generatedPutaway.warnings.length > 0 && (
-              <View style={styles.warningsBox}>
-                {generatedPutaway.warnings.map((w, i) => (
-                  <Text key={i} style={styles.warningText}>⚠️ {w}</Text>
-                ))}
-              </View>
-            )}
-
-            <Text style={styles.putawayItemCount}>
-              {generatedPutaway.items.length} items assigned to bins
-            </Text>
-
-            <TouchableOpacity
-              style={styles.goToPutawayButton}
-              onPress={() => navigation.navigate('Putaway')}
-            >
-              <Text style={styles.goToPutawayText}>Go to Put-Away →</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Info note */}
+        <View style={styles.infoNote}>
+          <Text style={styles.infoNoteText}>
+            ℹ️ Items are in float mode. Use the{' '}
+            <Text style={styles.infoNoteHighlight}>Assign Bin</Text> tab
+            to map items to bin locations.
+          </Text>
+        </View>
 
         {/* New Session Button */}
         <TouchableOpacity style={styles.newSessionButton} onPress={handleNewSession}>
@@ -676,83 +595,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  // Put-away section
-  putawaySection: {
-    backgroundColor: '#1A2332',
-    borderRadius: 12,
-    padding: 20,
-    marginHorizontal: 24,
-    marginTop: 20,
-  },
-  putawayTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  putawayDesc: {
-    color: '#8899AA',
-    fontSize: 14,
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  putawayError: {
-    color: '#EF4444',
-    fontSize: 13,
-    marginBottom: 12,
-  },
-  putawayResult: {
-    backgroundColor: '#1A2332',
-    borderRadius: 12,
-    padding: 20,
+  // Info note
+  infoNote: {
+    backgroundColor: 'rgba(26,115,232,0.1)',
+    borderRadius: 10,
+    padding: 14,
     marginHorizontal: 24,
     marginTop: 20,
     borderWidth: 1,
-    borderColor: '#1A73E8',
+    borderColor: 'rgba(26,115,232,0.25)',
   },
-  putawayResultTitle: {
-    color: '#4ADE80',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  putawayListNo: {
-    color: '#1A73E8',
-    fontSize: 24,
-    fontWeight: '800',
-    marginTop: 8,
-  },
-  putawayStatus: {
-    color: '#B0C4D8',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  warningsBox: {
-    backgroundColor: 'rgba(245,158,11,0.15)',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
-  },
-  warningText: {
-    color: '#F59E0B',
-    fontSize: 13,
-    marginBottom: 4,
-  },
-  putawayItemCount: {
+  infoNoteText: {
     color: '#8899AA',
-    fontSize: 14,
-    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 20,
   },
-  goToPutawayButton: {
-    backgroundColor: '#1A73E8',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  goToPutawayText: {
-    color: '#fff',
-    fontSize: 16,
+  infoNoteHighlight: {
+    color: '#1A73E8',
     fontWeight: '600',
   },
+
   newSessionButton: {
     borderWidth: 1,
     borderColor: '#2A3A4A',

@@ -12,6 +12,7 @@ import QrLoginScreen from '../screens/QrLoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import InboundScreen from '../screens/InboundScreen';
 import PutawayScreen from '../screens/PutawayScreen';
+import AssignBinScreen from '../screens/AssignBinScreen';
 import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
 import { useAuthStore } from '../store/authStore';
 
@@ -24,6 +25,7 @@ export type AuthStackParamList = {
 export type AppTabsParamList = {
   Dashboard: undefined;
   Inbound: undefined;
+  AssignBin: undefined;
   Putaway: undefined;
   ReceivingSlips: undefined;
 };
@@ -86,6 +88,16 @@ function AppTabs() {
           tabBarLabel: 'Inbound',
           tabBarIcon: ({ color }) => (
             <TabIcon label="📥" color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="AssignBin"
+        component={AssignBinScreen}
+        options={{
+          tabBarLabel: 'Assign Bin',
+          tabBarIcon: ({ color }) => (
+            <TabIcon label="🏷️" color={color} />
           ),
         }}
       />

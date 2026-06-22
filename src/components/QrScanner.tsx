@@ -50,10 +50,28 @@ function DataWedgeScanner({
   const handleSubmit = useCallback(() => {
     const value = scannedValueRef.current.trim();
     scannedValueRef.current = '';
+    inputRef.current?.clear();
     if (value) {
       setLastScanned(value);
       onScan(value);
     }
+  }, [onScan]);
+
+  // Process scan data as soon as DataWedge sends the terminator character
+  const handleTextChange = useCallback((text: string) => {
+    // DataWedge typically ends each scan with \n, \r, or \t
+    if (text.includes('\n') || text.includes('\r') || text.includes('\t')) {
+      const value = text.replace(/[\n\r\t]/g, '').trim();
+      if (value) {
+        inputRef.current?.clear();
+        scannedValueRef.current = '';
+        setLastScanned(value);
+        onScan(value);
+      }
+      return;
+    }
+    // Still accumulating characters
+    scannedValueRef.current = text;
   }, [onScan]);
 
   return (
@@ -64,9 +82,7 @@ function DataWedgeScanner({
         style={styles.hiddenInput}
         autoFocus
         showSoftInputOnFocus={false}
-        onChangeText={(text) => {
-          scannedValueRef.current = text;
-        }}
+        onChangeText={handleTextChange}
         onSubmitEditing={handleSubmit}
         onBlur={() => inputRef.current?.focus()}
         blurOnSubmit={false}
@@ -223,7 +239,7 @@ export default function QrScanner({ onScan, onClose, title, subtitle }: QrScanne
         style={styles.camera}
         facing="back"
         barcodeScannerSettings={{
-          barcodeTypes: ['qr', 'code128', 'code39', 'ean13', 'ean8', 'pdf417'],
+          barcodeTypes: ['qr'],
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       >

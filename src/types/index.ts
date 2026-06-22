@@ -18,6 +18,10 @@ export interface BarcodeLoginRequest {
   barcode: string;
 }
 
+export interface QRLoginRequest {
+  qr_code: string;
+}
+
 export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -38,6 +42,12 @@ export interface User {
 }
 
 export interface LoginResponse extends TokenResponse {
+  user: User;
+}
+
+export interface QRLoginResponse extends TokenResponse {
+  access_token: string;
+  refresh_token: string;
   user: User;
 }
 
@@ -197,6 +207,20 @@ export interface Pagination {
 export interface PaginatedResponse<T> {
   [key: string]: T[];
   pagination: Pagination;
+}
+
+// ---------- Bin QR ----------
+export interface BinQRPayload {
+  type: 'location';
+  org_id: string;
+  org_name: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id: string;
+  full_path: string;
+  location_type: string;
+  location_code: string;
 }
 
 // ---------- API Error ----------
