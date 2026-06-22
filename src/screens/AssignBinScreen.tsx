@@ -6,7 +6,6 @@ import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -131,10 +130,7 @@ export default function AssignBinScreen() {
   const [phase, setPhase] = useState<ScreenPhase>('idle');
   const [binInfo, setBinInfo] = useState<BinInfo | null>(null);
   const [items, setItems] = useState<ScannedItem[]>([]);
-  const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [batchInput, setBatchInput] = useState('');
-  const [qtyInput, setQtyInput] = useState('1');
   const [successSummary, setSuccessSummary] = useState<{ binCode: string; fullPath: string; itemCount: number } | null>(null);
 
   const binLocked = binInfo !== null;
@@ -165,7 +161,6 @@ export default function AssignBinScreen() {
           return;
         }
         setBinInfo(bin);
-        setLastScanned(`📍 Bin: ${bin.bin_code}`);
         return;
       }
 
@@ -188,17 +183,15 @@ export default function AssignBinScreen() {
         }
       }
 
-      // Use global batch/qty inputs
+      // Add to list with defaults (qty=1, no batch)
       const finalItem: ScannedItem = {
         ...parsed,
-        batch_number: batchInput.trim() || parsed.batch_number,
-        quantity: parseFloat(qtyInput) || parsed.quantity || 1,
+        quantity: parsed.quantity || 1,
       };
 
       setItems((prev) => [...prev, finalItem]);
-      setLastScanned(`📦 ${finalItem.sku}${finalItem.name ? ` — ${finalItem.name}` : ''} ×${finalItem.quantity}`);
     },
-    [binLocked, binInfo, selectedWarehouse, batchInput, qtyInput]
+    [binLocked, binInfo, selectedWarehouse]
   );
 
   // ============ Actions ============
@@ -206,10 +199,7 @@ export default function AssignBinScreen() {
   const handleStartScan = () => {
     setBinInfo(null);
     setItems([]);
-    setLastScanned(null);
     setError(null);
-    setBatchInput('');
-    setQtyInput('1');
     setPhase('scanning');
   };
 
@@ -265,10 +255,7 @@ export default function AssignBinScreen() {
   const handleNewSession = () => {
     setBinInfo(null);
     setItems([]);
-    setLastScanned(null);
     setError(null);
-    setBatchInput('');
-    setQtyInput('1');
     setSuccessSummary(null);
     setPhase('idle');
   };
@@ -314,20 +301,12 @@ export default function AssignBinScreen() {
   if (phase === 'scanning') {
     return (
       <View style={styles.container}>
-        {/* Status bar */}
+        {/* Status bar — minimal */}
         <View style={styles.statusBar}>
           <View style={styles.statusLeft}>
             <Text style={styles.statusLabel}>
               {binLocked ? '🔒 Bin locked' : '📱 Waiting for bin'}
             </Text>
-            {binInfo && (
-              <>
-                <Text style={styles.statusBinCode}>{binInfo.bin_code}</Text>
-                {binInfo.full_path !== binInfo.bin_code && (
-                  <Text style={styles.statusPath}>{binInfo.full_path}</Text>
-                )}
-              </>
-            )}
           </View>
           <View style={styles.statusRight}>
             <Text style={styles.statusCount}>{items.length}</Text>
@@ -341,42 +320,10 @@ export default function AssignBinScreen() {
           title={binLocked ? 'Scan Items' : 'Scan Bin or Item'}
           subtitle={
             binLocked
-              ? `Assigning to ${binInfo!.bin_code} • ${items.length} item(s) scanned`
+              ? `${items.length} item(s) scanned`
               : 'Scan a bin QR first, or scan items'
           }
         />
-
-        {/* Last scan toast */}
-        {lastScanned && (
-          <View style={styles.toast}>
-            <Text style={styles.toastText}>{lastScanned}</Text>
-          </View>
-        )}
-
-        {/* Quick inputs (batch + qty) */}
-        <View style={styles.quickInputs}>
-          <View style={styles.quickInputGroup}>
-            <Text style={styles.quickInputLabel}>Batch</Text>
-            <TextInput
-              style={styles.quickInput}
-              value={batchInput}
-              onChangeText={setBatchInput}
-              placeholder="Optional"
-              placeholderTextColor="#667788"
-            />
-          </View>
-          <View style={styles.quickInputGroup}>
-            <Text style={styles.quickInputLabel}>Qty</Text>
-            <TextInput
-              style={[styles.quickInput, styles.quickInputNarrow]}
-              value={qtyInput}
-              onChangeText={setQtyInput}
-              keyboardType="numeric"
-              placeholder="1"
-              placeholderTextColor="#667788"
-            />
-          </View>
-        </View>
 
         {/* Bottom actions */}
         <View style={styles.bottomActions}>
@@ -600,17 +547,6 @@ const styles = StyleSheet.create({
     color: '#1A73E8',
     fontSize: 12,
     fontWeight: '600',
-    marginBottom: 2,
-  },
-  statusBinCode: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  statusPath: {
-    color: '#8899AA',
-    fontSize: 11,
-    marginTop: 1,
   },
   statusRight: {
     alignItems: 'center',
@@ -629,52 +565,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 10,
     textTransform: 'uppercase',
-  },
-
-  toast: {
-    position: 'absolute',
-    bottom: 180,
-    left: 24,
-    right: 24,
-    backgroundColor: '#1A73E8',
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  toastText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  quickInputs: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    gap: 12,
-    backgroundColor: '#0F1923',
-  },
-  quickInputGroup: {
-    flex: 1,
-  },
-  quickInputLabel: {
-    color: '#8899AA',
-    fontSize: 11,
-    marginBottom: 4,
-  },
-  quickInput: {
-    backgroundColor: '#1A2332',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#fff',
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  quickInputNarrow: {
-    maxWidth: 80,
   },
 
   bottomActions: {
