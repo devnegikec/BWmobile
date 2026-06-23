@@ -17,11 +17,10 @@ export interface BinStockItem {
 }
 
 export interface AddBinStockRequest {
-  bin_location_id: string;
+  bin_id: string;
   item_id: string;
   quantity: number;
   batch_number?: string;
-  warehouse_id: string;
 }
 
 export interface BinStockResponse {
