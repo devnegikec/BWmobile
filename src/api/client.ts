@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // Base URLs — ngrok tunnel to local dev server
-const NGROK_HOST = 'https://184e-111-125-207-152.ngrok-free.app';
+const NGROK_HOST = 'https://0bf6-2401-4900-61ca-4af4-618b-db1a-64d5-af0e.ngrok-free.app';
 const IDENTITY_BASE_URL = `${NGROK_HOST}/api/v1`;
 const CORE_BASE_URL = `${NGROK_HOST}/api/v1`;
 
