@@ -41,11 +41,12 @@ function extractSkuFromUrl(url: string): string | null {
     const urlObj = new URL(url);
     const pathParts = urlObj.pathname.split('/').filter(Boolean);
 
-    // /g/{SKU}/... — e.g. https://pk.verify.example.com/g/12350301/s/5DBAD0/...
+    // /g/{SKU}/... — e.g. https://pg.verify.example.com/g/IND-10023/s/UCYFQ8/...
+    // SKU can be numeric (12350301) or alphanumeric with hyphens (IND-10023)
     const gIdx = pathParts.indexOf('g');
     if (gIdx !== -1 && gIdx + 1 < pathParts.length) {
       const candidate = pathParts[gIdx + 1];
-      if (candidate && /^\d+$/.test(candidate)) return candidate;
+      if (candidate && /^[\w-]+$/.test(candidate)) return candidate;
     }
 
     // Query param — ?sku=XXX, ?code=XXX, ?id=XXX
@@ -71,6 +72,8 @@ function extractSkuFromUrl(url: string): string | null {
 function parseBinQR(data: string): BinInfo | null {
   try {
     const parsed = JSON.parse(data);
+
+    // Must be a location-type QR — strict check to avoid treating item QRs as bins
     if (parsed.type === 'location' && parsed.location_id && parsed.location_code) {
       return {
         bin_location_id: parsed.location_id,
@@ -80,16 +83,19 @@ function parseBinQR(data: string): BinInfo | null {
         warehouse_name: parsed.warehouse_name || '',
       };
     }
-    const binId = parsed.bin_id || parsed.bin_location_id || parsed.id;
-    const binCode = parsed.bin_code || parsed.code || parsed.location;
+
+    // Legacy / alternate JSON format with explicit bin fields
+    // Only match if the JSON has bin-specific keys (not just a generic 'id' or 'code')
+    const binId = parsed.bin_id || parsed.bin_location_id;
+    const binCode = parsed.bin_code;
     if (binId && binCode) {
-      return { bin_location_id: binId, bin_code: binCode, full_path: binCode, warehouse_id: '', warehouse_name: '' };
+      return { bin_location_id: binId, bin_code: binCode, full_path: parsed.full_path || binCode, warehouse_id: parsed.warehouse_id || '', warehouse_name: parsed.warehouse_name || '' };
     }
     return null;
   } catch {
-    if (data.trim().length > 0) {
-      return { bin_location_id: data.trim(), bin_code: data.trim(), full_path: data.trim(), warehouse_id: '', warehouse_name: '' };
-    }
+    // Non-JSON data: do NOT treat as a bin — let parseItemQR handle it instead.
+    // Previously this fallthrough swallowed every plain-text scan (barcodes, SKUs, URLs),
+    // making it impossible to scan items after the bin was set.
     return null;
   }
 }
