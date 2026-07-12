@@ -68,6 +68,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await authService.loginWithBarcode({ barcode });
+
+      // Load warehouses before authenticating (per guide: Steps 2-3)
+      await get().loadWarehouses();
+
+      const { warehouses } = get();
+      if (warehouses.length === 0) {
+        set({
+          isLoading: false,
+          error:
+            'You are not assigned to any warehouse. Please contact your administrator.',
+        });
+        throw new Error('No warehouses assigned to your account.');
+      }
+
       set({
         isAuthenticated: true,
         worker: response.worker,
@@ -75,7 +89,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Invalid QR code. Please try again.';
+      // Preserve warehouse-specific error messages
+      if (error.message === 'No warehouses assigned to your account.') {
+        throw error;
+      }
+      const detail =
+        error.response?.data?.detail ||
+        error.message ||
+        'Invalid QR code. Please try again.';
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -86,6 +107,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await authService.loginWithQRCode({ qr_code: qrCode });
+
+      // Load warehouses before authenticating (per guide: Steps 2-3)
+      await get().loadWarehouses();
+
+      const { warehouses } = get();
+      if (warehouses.length === 0) {
+        set({
+          isLoading: false,
+          error:
+            'You are not assigned to any warehouse. Please contact your administrator.',
+        });
+        throw new Error('No warehouses assigned to your account.');
+      }
+
       set({
         isAuthenticated: true,
         user: response.user,
@@ -93,7 +128,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Invalid QR code. Please try again.';
+      // Preserve warehouse-specific error messages
+      if (error.message === 'No warehouses assigned to your account.') {
+        throw error;
+      }
+      const detail =
+        error.response?.data?.detail ||
+        error.message ||
+        'Invalid QR code. Please try again.';
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -113,6 +155,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const detail = error.response?.data?.detail || error.message || 'Failed to load warehouses';
       console.error('Failed to load warehouses:', error);
       set({ error: detail });
+      throw error; // Re-throw so login flow can handle it
     }
   },
 
