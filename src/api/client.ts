@@ -6,21 +6,32 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Base URLs — ngrok tunnel to local dev server
-const NGROK_HOST = 'https://flattop-obscurity-overwrite.ngrok-free.dev';
-const IDENTITY_BASE_URL = `${NGROK_HOST}/api/v1`;
-const CORE_BASE_URL = `${NGROK_HOST}/api/v1`;
+// Base URLs — Railway-deployed microservices (bypass legacy gateway)
+// All values sourced from .env (EXPO_PUBLIC_*), with fallbacks for safety.
+const IDENTITY_BASE_URL =
+  process.env.EXPO_PUBLIC_IDENTITY_URL ||
+  'https://identity-service-production-a1eb.up.railway.app/api/v1';
+const CORE_BASE_URL =
+  process.env.EXPO_PUBLIC_CORE_URL ||
+  'https://core-service-production-66e9.up.railway.app/api/v1';
+export const SEARCH_BASE_URL =
+  process.env.EXPO_PUBLIC_SEARCH_URL ||
+  'https://420a-2401-4900-619a-4bf0-89c0-e9f1-13b8-73fc.ngrok-free.app/api/v1';
 
-// ---------- Common Headers (ngrok bypass for free tier) ----------
-const COMMON_HEADERS = {
+// ---------- Request timeout (ms) ----------
+const REQUEST_TIMEOUT = Number(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT) || 15000;
+
+// ---------- Common Headers ----------
+const NGROK_SKIP_HEADER = process.env.EXPO_PUBLIC_NGROK_SKIP_HEADER || 'true';
+const COMMON_HEADERS: Record<string, string> = {
   'Content-Type': 'application/json',
-  'ngrok-skip-browser-warning': 'true', // Bypass ngrok free-tier interstitial page
+  ...(NGROK_SKIP_HEADER === 'true' ? { 'ngrok-skip-browser-warning': 'true' } : {}),
 };
 
 // ---------- Common Axios Config ----------
 const COMMON_CONFIG = {
   headers: COMMON_HEADERS,
-  timeout: 15000, // 15-second timeout to prevent hanging requests
+  timeout: REQUEST_TIMEOUT,
 };
 
 // ---------- Identity Service Client (Auth) ----------

@@ -1,0 +1,30 @@
+# Environment variables (contains service URLs)
+.env
+
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Build outputs
+web-build/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Debug
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
