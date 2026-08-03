@@ -49,6 +49,7 @@ export default function QrLoginScreen({ navigation }: any) {
           onClose={() => navigation.goBack()}
           title="Scan Worker QR Code"
           subtitle="Position the QR code within the frame"
+          showHardwareToggle
         />
       )}
 
