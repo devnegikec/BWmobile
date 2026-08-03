@@ -58,9 +58,21 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Failed to start session.';
-      set({ isLoading: false, error: detail });
-      throw new Error(detail);
+      const status = error.response?.status;
+      const detail = error.response?.data?.detail || '';
+      let message = 'Failed to start session.';
+
+      if (status === 403) {
+        message = 'Permission denied (403). Your account lacks the required permission. Contact your admin.';
+      } else if (status === 401) {
+        message = 'Session expired. Please log in again.';
+      } else if (detail) {
+        message = detail;
+      }
+
+      console.error('startSession failed:', { status, detail, message });
+      set({ isLoading: false, error: message });
+      throw new Error(message);
     }
   },
 
@@ -88,9 +100,19 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Duplicate scan or invalid QR.';
-      set({ isLoading: false, error: detail });
-      throw new Error(detail);
+      const status = error.response?.status;
+      const detail = error.response?.data?.detail || '';
+      let message = 'Duplicate scan or invalid QR.';
+
+      if (status === 403) {
+        message = 'Permission denied (403). Your account lacks the required permission.';
+      } else if (status === 400 && detail) {
+        message = detail;
+      }
+
+      console.error('recordScan failed:', { status, detail, message });
+      set({ isLoading: false, error: message });
+      throw new Error(message);
     }
   },
 
@@ -103,7 +125,10 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       const summary = await inboundService.getSessionSummary(session.id);
       set({ sessionSummary: summary, isLoading: false });
     } catch (error: any) {
-      set({ isLoading: false, error: 'Failed to load summary.' });
+      const status = error.response?.status;
+      const detail = error.response?.data?.detail || error.message || '';
+      console.error('loadSummary failed:', { status, detail, sessionId: session.id });
+      set({ isLoading: false, error: detail || 'Failed to load summary.' });
     }
   },
 
@@ -121,9 +146,45 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       });
       return slip;
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Failed to end session.';
-      set({ isLoading: false, error: detail });
-      throw new Error(detail);
+      const status = error.response?.status;
+      const detail = error.response?.data?.detail || '';
+      const responseData = error.response?.data;
+      let message = 'Failed to end session.';
+
+      if (status === 403) {
+        message =
+          'Permission denied (403). Your account lacks the "receiving_slip.create" permission. Contact your admin.';
+      } else if (status === 401) {
+        message =
+          'Authentication failed (401). Your session may have expired. Please log out and log in again.';
+      } else if (status === 404) {
+        message = 'Session not found (404). It may have already been ended.';
+      } else if (status === 500) {
+        message = `Server error (500). ${detail || 'Please try again or contact support.'}`;
+      } else if (detail) {
+        message = detail;
+      } else if (error.code === 'ECONNABORTED') {
+        message = 'Request timed out. Check your connection and try again.';
+      } else if (error.message === 'Network Error') {
+        message = 'Network error. Please check your connection.';
+      }
+
+      // Log full error for debugging
+      console.error('endSession failed:', {
+        status,
+        detail,
+        message,
+        sessionId: session.id,
+        errorCode: error.code,
+        errorMessage: error.message,
+        responseData,
+        isAxiosError: error.isAxiosError,
+        configUrl: error.config?.url,
+        configMethod: error.config?.method,
+      });
+
+      set({ isLoading: false, error: message });
+      throw new Error(message);
     }
   },
 

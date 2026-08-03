@@ -1,11 +1,11 @@
 // ============================================================
 // QR Scanner — Shared barcode/QR scanning component
 //
-// Two scanning modes (manually toggled):
-//   1. Camera-based (expo-camera) — default
-//   2. DataWedge hardware scanner — for Zebra devices
+// Two scanning modes:
+//   1. DataWedge hardware scanner — default on Zebra devices
+//   2. Camera-based (expo-camera) — used on non-Zebra devices
 //
-// On Zebra: tap "Use Hardware Scanner" to switch.
+// Zebra devices are auto-detected via Platform.constants.Manufacturer.
 // DataWedge must have a profile for: com.horizonsync.mobile
 // ============================================================
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -15,14 +15,24 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+
+// Detect Zebra devices by manufacturer string
+const isZebraDevice =
+  Platform.OS === 'android' &&
+  typeof Platform.constants?.Manufacturer === 'string' &&
+  Platform.constants.Manufacturer.toLowerCase().includes('zebra');
 
 interface QrScannerProps {
   onScan: (data: string) => void;
   onClose?: () => void;
   title?: string;
   subtitle?: string;
+  /** Show the "Use Hardware Scanner" / "Switch to Camera" toggle. Default: false */
+  showHardwareToggle?: boolean;
 }
 
 // ---------- DataWedge Hardware Scanner ----------
@@ -35,6 +45,7 @@ function DataWedgeScanner({
   const inputRef = useRef<TextInput>(null);
   const scannedValueRef = useRef('');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
   // Keep the hidden input focused so DataWedge keystrokes land here
   useEffect(() => {
@@ -120,7 +131,10 @@ function DataWedgeScanner({
         </View>
 
         {/* Switch back to camera */}
-        <TouchableOpacity style={styles.switchButton} onPress={onSwitchToCamera}>
+        <TouchableOpacity
+          style={[styles.switchButton, { marginBottom: insets.bottom + 16 }]}
+          onPress={onSwitchToCamera}
+        >
           <Text style={styles.switchButtonText}>Switch to Camera Scanner</Text>
         </TouchableOpacity>
       </View>
@@ -133,10 +147,12 @@ function PermissionDenied({
   requestPermission,
   onClose,
   onSwitchToHardware,
+  showHardwareToggle,
 }: {
   requestPermission: () => void;
   onClose?: () => void;
   onSwitchToHardware: () => void;
+  showHardwareToggle?: boolean;
 }) {
   return (
     <View style={styles.centered}>
@@ -146,9 +162,11 @@ function PermissionDenied({
       <TouchableOpacity style={styles.button} onPress={requestPermission}>
         <Text style={styles.buttonText}>Grant Permission</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.buttonOutline} onPress={onSwitchToHardware}>
-        <Text style={styles.buttonOutlineText}>Use Hardware Scanner Instead</Text>
-      </TouchableOpacity>
+      {showHardwareToggle && (
+        <TouchableOpacity style={styles.buttonOutline} onPress={onSwitchToHardware}>
+          <Text style={styles.buttonOutlineText}>Use Hardware Scanner Instead</Text>
+        </TouchableOpacity>
+      )}
       {onClose && (
         <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
           <Text style={styles.cancelButtonText}>Go Back</Text>
@@ -159,13 +177,25 @@ function PermissionDenied({
 }
 
 // ---------- Main QrScanner ----------
-export default function QrScanner({ onScan, onClose, title, subtitle }: QrScannerProps) {
+export default function QrScanner({ onScan, onClose, title, subtitle, showHardwareToggle = false }: QrScannerProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [useHardwareScanner, setUseHardwareScanner] = useState(false);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insets = useSafeAreaInsets();
 
+  // Clean up timeout on unmount
   useEffect(() => {
-    if (!useHardwareScanner && !permission?.granted && permission !== null) {
+    return () => {
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Only request camera permission on non-Zebra devices or when user switches to camera
+  useEffect(() => {
+    if (!isZebraDevice && !useHardwareScanner && !permission?.granted && permission !== null) {
       requestPermission();
     }
   }, [permission, useHardwareScanner]);
@@ -175,6 +205,16 @@ export default function QrScanner({ onScan, onClose, title, subtitle }: QrScanne
       if (scanned) return;
       setScanned(true);
       onScan(data);
+
+      // Auto-reset after 1.5s so user can scan the next code seamlessly.
+      // This prevents accidental double-scans of the same code while still
+      // allowing continuous scanning of different codes (bin → items, etc.).
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+      scanTimeoutRef.current = setTimeout(() => {
+        setScanned(false);
+      }, 1500);
     },
     [scanned, onScan]
   );
@@ -185,10 +225,6 @@ export default function QrScanner({ onScan, onClose, title, subtitle }: QrScanne
     },
     [onScan]
   );
-
-  const handleScanAgain = () => {
-    setScanned(false);
-  };
 
   const switchToHardware = () => setUseHardwareScanner(true);
   const switchToCamera = () => setUseHardwareScanner(false);
@@ -228,6 +264,7 @@ export default function QrScanner({ onScan, onClose, title, subtitle }: QrScanne
         requestPermission={requestPermission}
         onClose={onClose}
         onSwitchToHardware={switchToHardware}
+        showHardwareToggle={showHardwareToggle}
       />
     );
   }
@@ -263,15 +300,20 @@ export default function QrScanner({ onScan, onClose, title, subtitle }: QrScanne
           </Text>
 
           {scanned && (
-            <TouchableOpacity style={styles.scanAgainButton} onPress={handleScanAgain}>
-              <Text style={styles.scanAgainText}>Tap to Scan Again</Text>
-            </TouchableOpacity>
+            <View style={styles.scannedIndicator}>
+              <Text style={styles.scannedIndicatorText}>✓ Scanned</Text>
+            </View>
           )}
 
-          {/* Hardware scanner toggle */}
-          <TouchableOpacity style={styles.switchButton} onPress={switchToHardware}>
-            <Text style={styles.switchButtonText}>Use Hardware Scanner</Text>
-          </TouchableOpacity>
+          {/* Hardware scanner toggle — only shown when explicitly enabled */}
+          {showHardwareToggle && (
+            <TouchableOpacity
+              style={[styles.switchButton, { marginBottom: insets.bottom + 16 }]}
+              onPress={switchToHardware}
+            >
+              <Text style={styles.switchButtonText}>Use Hardware Scanner</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </CameraView>
     </View>
@@ -368,14 +410,21 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-  scanAgainButton: {
-    marginTop: 24,
-    backgroundColor: '#1A73E8',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+  // Scan success indicator (brief flash after each scan)
+  scannedIndicator: {
+    marginTop: 16,
+    backgroundColor: 'rgba(34,197,94,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.5)',
   },
-  scanAgainText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  scannedIndicatorText: {
+    color: '#22C55E',
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   // Switch button (camera ↔ hardware)
   switchButton: {

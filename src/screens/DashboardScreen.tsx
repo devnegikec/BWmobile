@@ -1,12 +1,13 @@
 // ============================================================
 // Dashboard Screen — Main hub after login
 // ============================================================
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 
@@ -15,19 +16,78 @@ export default function DashboardScreen({ navigation }: any) {
     user,
     worker,
     selectedWarehouse,
+    warehouses,
     loadWarehouses,
     logout,
   } = useAuthStore();
 
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [warehouseError, setWarehouseError] = useState<string | null>(null);
+
   const displayName = user?.display_name || worker?.display_name || 'User';
 
   useEffect(() => {
-    loadWarehouses();
+    // Load warehouses as fallback (e.g., for password-login users)
+    if (warehouses.length === 0 && !selectedWarehouse) {
+      loadWarehousesWrapper();
+    }
   }, []);
+
+  const loadWarehousesWrapper = async () => {
+    setLoadingWarehouses(true);
+    setWarehouseError(null);
+    try {
+      await loadWarehouses();
+    } catch (err: any) {
+      setWarehouseError(err.message || 'Failed to load warehouses');
+    } finally {
+      setLoadingWarehouses(false);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
   };
+
+  // ---- Empty warehouse state (no warehouses assigned) ----
+  if (!loadingWarehouses && warehouses.length === 0 && !selectedWarehouse) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyIcon}>🏭</Text>
+          <Text style={styles.emptyTitle}>No Warehouses Assigned</Text>
+          <Text style={styles.emptyMessage}>
+            You are not assigned to any warehouse.{'\n'}
+            Please contact your administrator.
+          </Text>
+          {warehouseError && (
+            <Text style={styles.emptyError}>{warehouseError}</Text>
+          )}
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadWarehousesWrapper}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.emptyLogoutBtn} onPress={handleLogout}>
+            <Text style={styles.emptyLogoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ---- Loading state ----
+  if (loadingWarehouses && !selectedWarehouse) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#1A73E8" />
+          <Text style={styles.loadingText}>Loading warehouses...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -213,5 +273,69 @@ const styles = StyleSheet.create({
     color: '#B0C4D8',
     fontSize: 11,
     fontWeight: '600',
+  },
+
+  // ---- Empty / Error State ----
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyIcon: {
+    fontSize: 56,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  emptyMessage: {
+    color: '#8899AA',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  emptyError: {
+    color: '#EF4444',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#1A73E8',
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  emptyLogoutBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  emptyLogoutText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+
+  // ---- Loading State ----
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#8899AA',
+    fontSize: 16,
+    marginTop: 16,
   },
 });

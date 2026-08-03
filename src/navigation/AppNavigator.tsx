@@ -6,6 +6,7 @@ import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import LoginScreen from '../screens/LoginScreen';
 import QrLoginScreen from '../screens/QrLoginScreen';
@@ -51,6 +52,8 @@ function AuthNavigator() {
 
 // ---------- App Tabs (Logged in) ----------
 function AppTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -59,8 +62,8 @@ function AppTabs() {
           backgroundColor: '#1A2332',
           borderTopColor: '#2A3A4A',
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + insets.bottom,
+          paddingBottom: 8 + insets.bottom,
           paddingTop: 8,
         },
         tabBarActiveTintColor: '#1A73E8',
@@ -137,8 +140,10 @@ export default function AppNavigator() {
   const { isAuthenticated } = useAuthStore();
 
   return (
-    <NavigationContainer>
-      {isAuthenticated ? <AppTabs /> : <AuthNavigator />}
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        {isAuthenticated ? <AppTabs /> : <AuthNavigator />}
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

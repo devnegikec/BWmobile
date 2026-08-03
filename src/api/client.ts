@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // Base URLs — ngrok tunnel to local dev server
-const NGROK_HOST = 'https://0bf6-2401-4900-61ca-4af4-618b-db1a-64d5-af0e.ngrok-free.app';
+const NGROK_HOST = 'https://flattop-obscurity-overwrite.ngrok-free.dev';
 const IDENTITY_BASE_URL = `${NGROK_HOST}/api/v1`;
 const CORE_BASE_URL = `${NGROK_HOST}/api/v1`;
 
@@ -124,9 +124,17 @@ async function handle401(error: AxiosError) {
     return Promise.reject(error);
   }
 
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & {
+    _retry?: boolean;
+    _refreshed?: boolean;
+  };
 
-  // Already retried — give up
+  // Already retried with a fresh token — give up, the token is being rejected
+  if (originalRequest._refreshed) {
+    return Promise.reject(error);
+  }
+
+  // Already in the retry queue — give up
   if (originalRequest._retry) {
     return Promise.reject(error);
   }
@@ -143,7 +151,7 @@ async function handle401(error: AxiosError) {
     })
       .then((token) => {
         originalRequest.headers.Authorization = `Bearer ${token}`;
-        return axios(originalRequest);
+        return coreClient.request(originalRequest);
       })
       .catch((err) => Promise.reject(err));
   }
@@ -163,10 +171,14 @@ async function handle401(error: AxiosError) {
 
     await saveTokens(data.access_token);
     processQueue(null, data.access_token);
-    originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
 
-    // Create a fresh config without the _retry flag
-    const retryConfig = { ...originalRequest } as InternalAxiosRequestConfig & { _retry?: boolean };
+    // Retry the original request with the new token.
+    // Mark _refreshed so if this retry also gets 401, we reject immediately
+    // instead of deadlocking in the isRefreshing queue.
+    const retryConfig = {
+      ...originalRequest,
+      _refreshed: true,
+    } as InternalAxiosRequestConfig & { _retry?: boolean; _refreshed?: boolean };
     delete retryConfig._retry;
     retryConfig.headers.Authorization = `Bearer ${data.access_token}`;
     return coreClient.request(retryConfig);
