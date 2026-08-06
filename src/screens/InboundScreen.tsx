@@ -11,17 +11,21 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import QrScanner from '../components/QrScanner';
 import * as inboundService from '../api/inboundService';
+import * as qsealService from '../api/qsealService';
 import type { SessionSummary, ReceivingSlip } from '../types';
+import type { QSealParentWithUnits } from '../types';
 
 type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
 export default function InboundScreen({ navigation }: any) {
-  const { selectedWarehouse } = useAuthStore();
+  const { selectedWarehouse, user, worker } = useAuthStore();
+  const orgId = user?.organization_id || worker?.organization_id || '';
   const {
     currentSession,
     sessionSummary,
@@ -30,8 +34,12 @@ export default function InboundScreen({ navigation }: any) {
     isScanning,
     isLoading,
     error,
+    linkedUnitsParent,
+    isFetchingLinkedUnits,
     startSession,
     recordScan,
+    fetchLinkedUnits,
+    clearLinkedUnits,
     loadSummary,
     endSession,
     clearSession,
@@ -73,12 +81,67 @@ export default function InboundScreen({ navigation }: any) {
     }
   };
 
+  // ---- Extract value to send to recordScan (plain serial, not full URL) ----
+  const extractScanValue = (qrData: string): string => {
+    const trimmed = qrData.trim();
+
+    // If it's a QSeal URL with /s/{serial}/ pattern, extract the serial
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        const url = new URL(trimmed);
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        const sIdx = pathParts.indexOf('s');
+        if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
+          return pathParts[sIdx + 1]; // e.g., "JV9HKW"
+        }
+      } catch {}
+    }
+
+    // Non-URL or non-QSeal → send as-is
+    return trimmed;
+  };
+
   const handleScan = async (data: string) => {
+    // Extract plain value for the backend scan endpoint (not the full URL)
+    const scanValue = extractScanValue(data);
+
     try {
-      await recordScan(data);
+      await recordScan(scanValue);
     } catch (err: any) {
       // Duplicate scan — just show a brief warning, don't block
       Alert.alert('Notice', err.message);
+    }
+
+    // Detect if this is a QSeal QR and fetch linked units
+    detectAndFetchLinkedUnits(data);
+  };
+
+  // ---- QSeal detection & linked units fetch ----
+  const detectAndFetchLinkedUnits = async (qrData: string) => {
+    const trimmed = qrData.trim();
+
+    // Only process URLs
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return;
+
+    try {
+      const url = new URL(trimmed);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      const sIdx = pathParts.indexOf('s');
+      if (sIdx === -1 || sIdx + 1 >= pathParts.length) return;
+
+      // Extract serial and resolve to UUID
+      const serial = pathParts[sIdx + 1];
+      const node = await qsealService.scanQSeal(orgId, {
+        serial_number: serial,
+        device_type: 'mobile',
+        os: 'iOS/Android',
+        ip_address: '',
+      });
+
+      // Fetch linked units for this parent
+      await fetchLinkedUnits(node.node_id);
+    } catch {
+      // Not a QSeal QR or failed to resolve — ignore silently
     }
   };
 
@@ -113,6 +176,7 @@ export default function InboundScreen({ navigation }: any) {
 
   const handleNewSession = () => {
     clearSession();
+    clearLinkedUnits();
     setDockLocation('');
     setStep('idle');
   };
@@ -192,6 +256,35 @@ export default function InboundScreen({ navigation }: any) {
             <Text style={styles.lastScanText}>
               ✅ {lastScan.sku} · Qty: {lastScan.raw_quantity} · {lastScan.batch_number || 'No batch'}
             </Text>
+          </View>
+        )}
+
+        {/* QSeal Linked Units (fetched when parent QSeal scanned) */}
+        {isFetchingLinkedUnits && (
+          <View style={styles.linkedUnitsLoading}>
+            <ActivityIndicator size="small" color="#1A73E8" />
+            <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
+          </View>
+        )}
+        {linkedUnitsParent && linkedUnitsParent.linked_units.length > 0 && (
+          <View style={styles.linkedUnitsPanel}>
+            <View style={styles.linkedUnitsHeader}>
+              <Text style={styles.linkedUnitsTitle}>
+                🔗 {linkedUnitsParent.name} — {linkedUnitsParent.linked_units.length} linked unit(s)
+              </Text>
+            </View>
+            {linkedUnitsParent.linked_units.map((unit) => (
+              <View key={unit.id} style={styles.linkedUnitRow}>
+                <View style={styles.linkedUnitInfo}>
+                  <Text style={styles.linkedUnitSerial}>{unit.serial_number}</Text>
+                  <Text style={styles.linkedUnitBatch}>
+                    Batch: {unit.dispatch_batch}
+                    {unit.manufacturing_date ? ` · Mfg: ${unit.manufacturing_date}` : ''}
+                    {unit.expiry_date ? ` · Exp: ${unit.expiry_date}` : ''}
+                  </Text>
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -290,6 +383,30 @@ export default function InboundScreen({ navigation }: any) {
             </View>
           ))}
         </View>
+
+        {/* QSeal Linked Units */}
+        {linkedUnitsParent && linkedUnitsParent.linked_units.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>
+              🔗 Linked Units ({linkedUnitsParent.linked_units.length})
+            </Text>
+            <Text style={styles.linkedParentName}>
+              Parent: {linkedUnitsParent.name} ({linkedUnitsParent.serial_number})
+            </Text>
+            {linkedUnitsParent.linked_units.map((unit) => (
+              <View key={unit.id} style={styles.linkedUnitRow}>
+                <View style={styles.linkedUnitInfo}>
+                  <Text style={styles.linkedUnitSerial}>{unit.serial_number}</Text>
+                  <Text style={styles.linkedUnitBatch}>
+                    Batch: {unit.dispatch_batch}
+                    {unit.manufacturing_date ? ` · Mfg: ${unit.manufacturing_date}` : ''}
+                    {unit.expiry_date ? ` · Exp: ${unit.expiry_date}` : ''}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Info note */}
         <View style={styles.infoNote}>
@@ -628,4 +745,40 @@ const styles = StyleSheet.create({
     color: '#8899AA',
     fontSize: 16,
   },
+
+  // ---- Linked Units ----
+  linkedUnitsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    gap: 8,
+  },
+  linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
+  linkedUnitsPanel: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    margin: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  linkedUnitsHeader: { marginBottom: 10 },
+  linkedUnitsTitle: { color: '#4ADE80', fontSize: 14, fontWeight: '700' },
+  linkedParentName: { color: '#667788', fontSize: 12, marginBottom: 8 },
+  linkedUnitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  linkedUnitInfo: { flex: 1 },
+  linkedUnitSerial: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  linkedUnitBatch: { color: '#8899AA', fontSize: 11, marginTop: 2 },
 });

@@ -8,6 +8,7 @@ import type {
   QSealMapRequest,
   QSealMapResponse,
   QSealHistoryResponse,
+  QSealParentWithUnits,
 } from '../types';
 
 // ---------- Scan a QSeal (public endpoint) ----------
@@ -64,6 +65,14 @@ export async function getQSealHistory(params?: {
   const { data } = await coreClient.get<QSealHistoryResponse>(
     '/qseal/history',
     { params }
+  );
+  return data;
+}
+
+// ---------- Get Linked Units for a Parent QSeal ----------
+export async function getLinkedUnits(parentId: string): Promise<QSealParentWithUnits> {
+  const { data } = await coreClient.get<QSealParentWithUnits>(
+    `/qseal/parents/${parentId}/linked-units`
   );
   return data;
 }

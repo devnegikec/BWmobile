@@ -270,6 +270,28 @@ export interface QSealHistoryItem {
   country: string;
 }
 
+// ---------- QSeal Linked Units ----------
+export interface LinkedUnit {
+  id: string;
+  serial_number: string;
+  manufacturing_date: string;
+  expiry_date: string;
+  dispatch_batch: string;
+  mrp: number | null;
+  product_item_url: string;
+  product_item_scan_count: number;
+}
+
+export interface QSealParentWithUnits {
+  id: string;
+  serial_number: string;
+  name: string;
+  qseal_type: string;
+  capacity: number;
+  children_count: number;
+  linked_units: LinkedUnit[];
+}
+
 export interface QSealHistoryResponse {
   events: QSealHistoryItem[];
   pagination: Pagination;

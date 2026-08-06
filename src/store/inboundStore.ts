@@ -8,7 +8,9 @@ import type {
   SessionSummary,
   ReceivingSlip,
 } from '../types';
+import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
+import * as qsealService from '../api/qsealService';
 
 interface InboundState {
   // Current session
@@ -22,9 +24,15 @@ interface InboundState {
   isLoading: boolean;
   error: string | null;
 
+  // QSeal linked units (fetched when a parent QSeal is scanned during inbound)
+  linkedUnitsParent: QSealParentWithUnits | null;
+  isFetchingLinkedUnits: boolean;
+
   // Actions
   startSession: (warehouseId: string, dockLocation: string) => Promise<void>;
   recordScan: (qrData: string) => Promise<void>;
+  fetchLinkedUnits: (parentId: string) => Promise<void>;
+  clearLinkedUnits: () => void;
   loadSummary: () => Promise<void>;
   endSession: () => Promise<ReceivingSlip>;
   clearSession: () => void;
@@ -40,6 +48,8 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   isScanning: false,
   isLoading: false,
   error: null,
+  linkedUnitsParent: null,
+  isFetchingLinkedUnits: false,
 
   // ---------- Start Session ----------
   startSession: async (warehouseId, dockLocation) => {
@@ -115,6 +125,22 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       throw new Error(message);
     }
   },
+
+  // ---------- Fetch Linked Units (QSeal parent scanned during inbound) ----------
+  fetchLinkedUnits: async (parentId: string) => {
+    set({ isFetchingLinkedUnits: true, error: null });
+    try {
+      const data = await qsealService.getLinkedUnits(parentId);
+      set({ linkedUnitsParent: data, isFetchingLinkedUnits: false });
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || error.message || 'Failed to fetch linked units.';
+      const msg = typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail));
+      console.error('fetchLinkedUnits failed:', msg);
+      set({ isFetchingLinkedUnits: false, error: msg });
+    }
+  },
+
+  clearLinkedUnits: () => set({ linkedUnitsParent: null }),
 
   // ---------- Load Summary ----------
   loadSummary: async () => {
@@ -194,6 +220,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       sessionSummary: null,
       lastScan: null,
       generatedSlip: null,
+      linkedUnitsParent: null,
       isScanning: false,
     }),
 
