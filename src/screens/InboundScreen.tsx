@@ -27,6 +27,8 @@ type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  if (!parents || parents.length === 0) return null;
+
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -36,7 +38,7 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
   };
 
   const boxCount = parents.length;
-  const itemCount = parents.reduce((sum, p) => sum + p.linked_units.length, 0);
+  const itemCount = parents.reduce((sum, p) => sum + (p.linked_units?.length || 0), 0);
 
   return (
     <View style={styles.tableContainer}>
@@ -59,7 +61,8 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
       {/* Parent rows */}
       {parents.map((parent, pIdx) => {
         const isOpen = expanded.has(parent.id);
-        const firstUnit = parent.linked_units[0];
+        const units = parent.linked_units || [];
+        const firstUnit = units[0];
         return (
           <View key={parent.id}>
             <TouchableOpacity
@@ -80,13 +83,13 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
                 {pIdx + 1}/{boxCount}
               </Text>
               <Text style={[styles.cell, styles.colQty]}>
-                {parent.linked_units.length}
+                {units.length}
               </Text>
             </TouchableOpacity>
 
             {/* Expanded: unit details */}
             {isOpen &&
-              parent.linked_units.map((unit) => (
+              units.map((unit) => (
                 <View key={unit.id} style={styles.unitRow}>
                   <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
                     {'    '}└ {unit.serial_number}
@@ -254,9 +257,10 @@ export default function InboundScreen({ navigation }: any) {
       }));
 
       // Step 3: Record each linked unit's product_item_url as a scan
-      if (parentWithUnits.linked_units.length > 0) {
+      const units = parentWithUnits.linked_units || [];
+      if (units.length > 0) {
         let scannedCount = 0;
-        for (const unit of parentWithUnits.linked_units) {
+        for (const unit of units) {
           const url = unit.product_item_url || unit.serial_number;
           console.log('[Inbound] Step 3: recordScan linked unit:', {
             serial: unit.serial_number,
@@ -275,7 +279,7 @@ export default function InboundScreen({ navigation }: any) {
           }
         }
         console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
-        const boxCount = useInboundStore.getState().linkedUnitsParents.length;
+        const boxCount = useInboundStore.getState().linkedUnitsParents?.length || 0;
         if (scannedCount > 0) {
           Alert.alert(
             'QSeal Processed',
@@ -418,7 +422,7 @@ export default function InboundScreen({ navigation }: any) {
             <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
           </View>
         )}
-        {linkedUnitsParents.length > 0 && (
+        {linkedUnitsParents?.length > 0 && (
           <LinkedUnitsTable parents={linkedUnitsParents} />
         )}
 
@@ -519,7 +523,7 @@ export default function InboundScreen({ navigation }: any) {
         </View>
 
         {/* QSeal Linked Units */}
-        {linkedUnitsParents.length > 0 && (
+        {linkedUnitsParents?.length > 0 && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
             <LinkedUnitsTable parents={linkedUnitsParents} />
