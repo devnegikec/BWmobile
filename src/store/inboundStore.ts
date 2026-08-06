@@ -95,6 +95,10 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
+      console.log('[InboundStore] recordScan API call:', {
+        sessionId: session.id,
+        payload: { qr_data: qrData?.substring(0, 100), device_type: 'mobile', os: 'iOS/Android' },
+      });
       const scan = await inboundService.recordScan(session.id, {
         qr_data: qrData,
         device_type: 'mobile',

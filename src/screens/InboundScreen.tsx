@@ -35,10 +35,8 @@ export default function InboundScreen({ navigation }: any) {
     isLoading,
     error,
     linkedUnitsParent,
-    isFetchingLinkedUnits,
     startSession,
     recordScan,
-    fetchLinkedUnits,
     clearLinkedUnits,
     loadSummary,
     endSession,
@@ -48,6 +46,7 @@ export default function InboundScreen({ navigation }: any) {
 
   const [step, setStep] = useState<Step>('idle');
   const [dockLocation, setDockLocation] = useState('');
+  const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
 
   // Sync step with store state
   useEffect(() => {
@@ -81,68 +80,112 @@ export default function InboundScreen({ navigation }: any) {
     }
   };
 
-  // ---- Extract value to send to recordScan (plain serial, not full URL) ----
-  const extractScanValue = (qrData: string): string => {
+  // ---- Extract serial from QSeal URL, or null if not a QSeal QR ----
+  const extractQSealSerial = (qrData: string): string | null => {
     const trimmed = qrData.trim();
-
-    // If it's a QSeal URL with /s/{serial}/ pattern, extract the serial
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      try {
-        const url = new URL(trimmed);
-        const pathParts = url.pathname.split('/').filter(Boolean);
-        const sIdx = pathParts.indexOf('s');
-        if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
-          return pathParts[sIdx + 1]; // e.g., "JV9HKW"
-        }
-      } catch {}
-    }
-
-    // Non-URL or non-QSeal → send as-is
-    return trimmed;
-  };
-
-  const handleScan = async (data: string) => {
-    // Extract plain value for the backend scan endpoint (not the full URL)
-    const scanValue = extractScanValue(data);
-
-    try {
-      await recordScan(scanValue);
-    } catch (err: any) {
-      // Duplicate scan — just show a brief warning, don't block
-      Alert.alert('Notice', err.message);
-    }
-
-    // Detect if this is a QSeal QR and fetch linked units
-    detectAndFetchLinkedUnits(data);
-  };
-
-  // ---- QSeal detection & linked units fetch ----
-  const detectAndFetchLinkedUnits = async (qrData: string) => {
-    const trimmed = qrData.trim();
-
-    // Only process URLs
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return;
-
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
     try {
       const url = new URL(trimmed);
       const pathParts = url.pathname.split('/').filter(Boolean);
       const sIdx = pathParts.indexOf('s');
-      if (sIdx === -1 || sIdx + 1 >= pathParts.length) return;
+      if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
+        return pathParts[sIdx + 1];
+      }
+    } catch {}
+    return null;
+  };
 
-      // Extract serial and resolve to UUID
-      const serial = pathParts[sIdx + 1];
+  const handleScan = async (data: string) => {
+    console.log('[Inbound] handleScan raw data:', data.substring(0, 120));
+    const qsealSerial = extractQSealSerial(data);
+    console.log('[Inbound] isQSeal:', !!qsealSerial, 'serial:', qsealSerial);
+
+    if (qsealSerial) {
+      // ---- QSeal parent QR: resolve → fetch linked units → record each ----
+      await handleQSealScan(qsealSerial);
+    } else {
+      // ---- Regular item QR: record scan directly ----
+      console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
+      try {
+        await recordScan(data);
+        console.log('[Inbound] recordScan SUCCESS');
+      } catch (err: any) {
+        console.log('[Inbound] recordScan FAILED:', {
+          status: err?.response?.status,
+          data: JSON.stringify(err?.response?.data),
+        });
+        Alert.alert('Notice', err.message);
+      }
+    }
+  };
+
+  // ---- QSeal parent scan: Step 1→2→3 ----
+  const handleQSealScan = async (serial: string) => {
+    console.log('[Inbound] QSeal scan started, serial:', serial);
+    setIsProcessingQSeal(true);
+    try {
+      // Step 1: Resolve serial → get parent UUID
+      console.log('[Inbound] Step 1: POST /qseal/scan', { serial_number: serial, orgId });
       const node = await qsealService.scanQSeal(orgId, {
         serial_number: serial,
         device_type: 'mobile',
         os: 'iOS/Android',
         ip_address: '',
       });
+      console.log('[Inbound] Step 1 OK: node_id:', node.node_id, 'type:', node.qseal_type);
 
-      // Fetch linked units for this parent
-      await fetchLinkedUnits(node.node_id);
-    } catch {
-      // Not a QSeal QR or failed to resolve — ignore silently
+      // Step 2: Fetch linked units
+      console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
+      const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
+      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
+      fetchLinkedUnitsDirect(parentWithUnits);
+
+      // Step 3: Record each linked unit's product_item_url as a scan
+      if (parentWithUnits.linked_units.length > 0) {
+        let scannedCount = 0;
+        for (const unit of parentWithUnits.linked_units) {
+          const url = unit.product_item_url || unit.serial_number;
+          console.log('[Inbound] Step 3: recordScan linked unit:', {
+            serial: unit.serial_number,
+            url: url?.substring(0, 80),
+          });
+          try {
+            await recordScan(url);
+            scannedCount++;
+            console.log('[Inbound] Step 3 OK:', unit.serial_number);
+          } catch (err: any) {
+            console.log('[Inbound] Step 3 FAILED:', {
+              serial: unit.serial_number,
+              status: err?.response?.status,
+              data: JSON.stringify(err?.response?.data),
+            });
+          }
+        }
+        console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
+        if (scannedCount > 0) {
+          Alert.alert(
+            'QSeal Processed',
+            `${parentWithUnits.name}: ${scannedCount} linked unit(s) recorded from ${parentWithUnits.linked_units.length} total.`
+          );
+        }
+      }
+    } catch (err: any) {
+      console.log('[Inbound] QSeal scan FAILED:', {
+        status: err?.response?.status,
+        data: JSON.stringify(err?.response?.data),
+        message: err?.message,
+      });
+      const detail = err?.response?.data?.detail || err?.message || '';
+      const msg = typeof detail === 'string' ? detail : (detail?.message || 'Failed to process QSeal.');
+      Alert.alert('QSeal Error', msg);
+    } finally {
+      setIsProcessingQSeal(false);
     }
+  };
+
+  // ---- Direct set (no re-fetch) ----
+  const fetchLinkedUnitsDirect = (data: typeof linkedUnitsParent) => {
+    useInboundStore.setState({ linkedUnitsParent: data });
   };
 
   const handleViewSummary = async () => {
@@ -260,7 +303,7 @@ export default function InboundScreen({ navigation }: any) {
         )}
 
         {/* QSeal Linked Units (fetched when parent QSeal scanned) */}
-        {isFetchingLinkedUnits && (
+        {isProcessingQSeal && (
           <View style={styles.linkedUnitsLoading}>
             <ActivityIndicator size="small" color="#1A73E8" />
             <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
