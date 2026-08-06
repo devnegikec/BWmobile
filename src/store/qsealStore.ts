@@ -20,10 +20,12 @@ function getErrorMessage(err: any): string {
   return 'Something went wrong. Please try again.';
 }
 
-// ---- Local-only scanned item (no backend lookup) ----
+// ---- Scanned QSeal item (serial + backend UUID) ----
 export interface ScannedQSeal {
   /** Serial number extracted from the QR code */
   serialNumber: string;
+  /** Backend node UUID (from POST /qseal/scan response) */
+  nodeId: string;
   /** Timestamp when scanned */
   scannedAt: number;
 }
@@ -40,10 +42,10 @@ interface QSealState {
   error: string | null;
 
   // ---- Actions ----
-  /** Set the parent serial (scanned as parent) */
-  setParent: (serialNumber: string) => void;
-  /** Add a child serial to the batch */
-  addChild: (serialNumber: string) => void;
+  /** Set the parent (serial + backend nodeId) */
+  setParent: (serialNumber: string, nodeId: string) => void;
+  /** Add a child to the batch (serial + backend nodeId) */
+  addChild: (serialNumber: string, nodeId: string) => void;
   /** Remove a child from the batch */
   removeChild: (serialNumber: string) => void;
   /** Send map request to backend with all scanned serials */
@@ -63,7 +65,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
   error: null,
 
   // ---- Set Parent ----
-  setParent: (serialNumber: string) => {
+  setParent: (serialNumber: string, nodeId: string) => {
     const { parent, children } = get();
     set({ error: null });
 
@@ -72,7 +74,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
       return;
     }
 
-    const scanned: ScannedQSeal = { serialNumber, scannedAt: Date.now() };
+    const scanned: ScannedQSeal = { serialNumber, nodeId, scannedAt: Date.now() };
 
     // Child-first flow: children exist, now parent is being set → ready to link
     if (children.length > 0) {
@@ -85,7 +87,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
   },
 
   // ---- Add Child ----
-  addChild: (serialNumber: string) => {
+  addChild: (serialNumber: string, nodeId: string) => {
     const { parent, children, cascadeMode } = get();
     set({ error: null });
 
@@ -101,7 +103,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
       return;
     }
 
-    const scanned: ScannedQSeal = { serialNumber, scannedAt: Date.now() };
+    const scanned: ScannedQSeal = { serialNumber, nodeId, scannedAt: Date.now() };
 
     // No parent yet → child-first flow
     if (!parent) {
@@ -133,9 +135,9 @@ export const useQSealStore = create<QSealState>((set, get) => ({
 
     set({ isSubmitting: true, error: null });
     try {
-      // Send serial numbers as IDs — backend resolves/looks up by serial
-      const result = await qsealService.mapChildren(parent.serialNumber, {
-        child_ids: children.map((c) => c.serialNumber),
+      // Send UUIDs (node_id from scan API) to the map endpoint
+      const result = await qsealService.mapChildren(parent.nodeId, {
+        child_ids: children.map((c) => c.nodeId),
       });
       set({
         isSubmitting: false,

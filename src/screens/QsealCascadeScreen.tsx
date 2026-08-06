@@ -10,13 +10,14 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Modal,
   Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { useAuthStore } from '../store/authStore';
 import { useQSealStore } from '../store/qsealStore';
 import QrScanner from '../components/QrScanner';
+import * as qsealService from '../api/qsealService';
 
 type Phase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
 
@@ -69,6 +70,9 @@ function extractSerial(data: string): string | null {
 }
 
 export default function QsealCascadeScreen({ navigation }: any) {
+  const { user, worker } = useAuthStore();
+  const orgId = user?.organization_id || worker?.organization_id || '';
+
   const {
     parent,
     children,
@@ -85,10 +89,11 @@ export default function QsealCascadeScreen({ navigation }: any) {
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
 
-  // ---- Handle QR scan (LOCAL ONLY — no backend call) ----
+  // ---- Handle QR scan (calls POST /qseal/scan to get UUID, then stores locally) ----
   const handleScan = useCallback(
-    (data: string) => {
+    async (data: string) => {
       clearError();
 
       const serial = extractSerial(data);
@@ -97,16 +102,33 @@ export default function QsealCascadeScreen({ navigation }: any) {
         return;
       }
 
-      setLastScanned(serial);
+      setIsScanning(true);
+      try {
+        const node = await qsealService.scanQSeal(orgId, {
+          serial_number: serial,
+          device_type: Platform.OS,
+          os: Platform.OS === 'ios' ? `iOS ${Platform.Version}` : `Android ${Platform.Version}`,
+          ip_address: '',
+        });
 
-      // First scan → set as parent, subsequent scans → children
-      if (!parent) {
-        setParent(serial);
-      } else {
-        addChild(serial);
+        setLastScanned(serial);
+
+        // First scan → set as parent, subsequent scans → children
+        if (!parent) {
+          setParent(serial, node.node_id);
+        } else {
+          addChild(serial, node.node_id);
+        }
+      } catch (err: any) {
+        const detail =
+          err?.response?.data?.detail || err?.message || 'Failed to look up QSeal.';
+        const msg = typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail));
+        Alert.alert('Scan Error', msg);
+      } finally {
+        setIsScanning(false);
       }
     },
-    [parent, setParent, addChild, clearError]
+    [orgId, parent, setParent, addChild, clearError]
   );
 
   // ---- Review → finalize (sends map request to backend) ----
@@ -151,7 +173,7 @@ export default function QsealCascadeScreen({ navigation }: any) {
           <Text style={styles.idleTitle}>QSeal Cascade</Text>
           <Text style={styles.idleSubtitle}>
             Scan a parent QSeal first, then scan child QSeals.{'\n'}
-            All scans happen locally — only the final link is sent to the backend.
+            Each scan resolves the serial number against the backend.
           </Text>
           <TouchableOpacity style={styles.idleScanBtn} onPress={handleStartScan}>
             <Text style={styles.idleScanBtnText}>Start Scanning</Text>
@@ -185,13 +207,20 @@ export default function QsealCascadeScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* Last scanned feedback */}
-        {lastScanned && (
-          <View style={styles.scanToast}>
-            <Text style={styles.scanToastText}>
-              ✅ {lastScanned}
-              {parent && lastScanned === parent.serialNumber ? ' (Parent)' : ' (Child)'}
-            </Text>
+        {/* Last scanned feedback + loading indicator */}
+        {(lastScanned || isScanning) && (
+          <View style={[styles.scanToast, isScanning && styles.scanToastLoading]}>
+            {isScanning ? (
+              <View style={styles.scanToastRow}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.scanToastText}> Resolving...</Text>
+              </View>
+            ) : (
+              <Text style={styles.scanToastText}>
+                ✅ {lastScanned}
+                {parent && lastScanned === parent.serialNumber ? ' (Parent)' : ' (Child)'}
+              </Text>
+            )}
           </View>
         )}
 
@@ -437,6 +466,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanToastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  scanToastLoading: { backgroundColor: 'rgba(26,115,232,0.9)' },
+  scanToastRow: { flexDirection: 'row', alignItems: 'center' },
 
   bottomActions: {
     flexDirection: 'row',
