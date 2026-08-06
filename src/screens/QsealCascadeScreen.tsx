@@ -1,7 +1,9 @@
 // ============================================================
 // QSeal Cascade Screen — Parent-Child QR Linking
+// Continuous scanning (like AssignBin). First scan = parent, rest = children.
+// Only the final "Link" hits the backend.
 // ============================================================
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,477 +15,341 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuthStore } from '../store/authStore';
 import { useQSealStore } from '../store/qsealStore';
 import QrScanner from '../components/QrScanner';
-import * as qsealService from '../api/qsealService';
-import type { QSealNode } from '../types';
 
-const DEVICE_TYPE = Platform.OS;
-const OS = Platform.OS === 'ios' ? `iOS ${Platform.Version}` : `Android ${Platform.Version}`;
+type Phase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
+
+// ---- Serial number extraction ----
+// URL pattern: https://v0-horizon-sync.vercel.app/g/{sku}/s/{SERIAL}/{...}?c=...
+// The serial is the path segment immediately after /s/
+function extractSerial(data: string): string | null {
+  const trimmed = data.trim();
+
+  // If it's a URL, parse the path
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      const url = new URL(trimmed);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+
+      // Find /s/ segment — serial is the next segment
+      const sIdx = pathParts.indexOf('s');
+      if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
+        return pathParts[sIdx + 1];
+      }
+
+      // Fallback: last path segment (if it looks like a serial, not a number-only timestamp)
+      if (pathParts.length > 0) {
+        const last = pathParts[pathParts.length - 1];
+        // Skip pure-numeric segments (likely timestamps like 1785994326500)
+        if (last && !/^\d{10,}$/.test(last)) {
+          return last;
+        }
+        // Second-to-last if last is numeric
+        if (pathParts.length >= 2) {
+          const secondLast = pathParts[pathParts.length - 2];
+          if (secondLast && !/^\d+$/.test(secondLast)) {
+            return secondLast;
+          }
+        }
+      }
+
+      return null;
+    } catch {
+      // Fall through to raw string handling
+    }
+  }
+
+  // Raw serial (e.g., "JV9HKW" or "QSL7A3B2C1D")
+  if (trimmed.length >= 2 && trimmed.length <= 50) {
+    return trimmed;
+  }
+
+  return null;
+}
 
 export default function QsealCascadeScreen({ navigation }: any) {
-  const insets = useSafeAreaInsets();
-  const { selectedWarehouse, user, worker } = useAuthStore();
-  const orgId = user?.organization_id || worker?.organization_id || '';
-
   const {
     parent,
     children,
-    cascadeMode,
     isSubmitting,
     lastMapResult,
     error,
-    isParentFull,
-    remainingCapacity,
-    addScannedNode,
+    setParent,
+    addChild,
     removeChild,
     finalizeCascade,
     resetCascade,
     clearError,
   } = useQSealStore();
 
-  const [showScanner, setShowScanner] = useState(false);
-  const [scannerTitle, setScannerTitle] = useState('Scan QSeal QR Code');
-  const [scannerSubtitle, setScannerSubtitle] = useState('');
-  const [showLinkPopup, setShowLinkPopup] = useState(false);
-  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
-  const [isScanningChild, setIsScanningChild] = useState(false);
-  const prevChildrenLen = useRef(children.length);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [lastScanned, setLastScanned] = useState<string | null>(null);
 
-  // ---- Auto-show link popup when: ----
-  // 1. Child-first flow: parent is scanned after children exist
-  // 2. Parent-first flow: capacity becomes full after adding a child
-  useEffect(() => {
-    // Child-first flow: parent just got set and we have children
-    if (cascadeMode === 'child-first' && parent && children.length > 0 && !showLinkPopup) {
-      // Small delay so the user sees the scan result first
-      const timer = setTimeout(() => setShowLinkPopup(true), 600);
-      return () => clearTimeout(timer);
-    }
-
-    // Parent-first flow: capacity just got full
-    if (cascadeMode === 'parent-first' && parent && children.length > prevChildrenLen.current && isParentFull()) {
-      const timer = setTimeout(() => setShowLinkPopup(true), 600);
-      prevChildrenLen.current = children.length;
-      return () => clearTimeout(timer);
-    }
-
-    prevChildrenLen.current = children.length;
-  }, [parent, children.length, cascadeMode]);
-
-  // ---- Auto-show success popup ----
-  useEffect(() => {
-    if (lastMapResult) {
-      setShowSuccessPopup(true);
-    }
-  }, [lastMapResult]);
-
-  // ---- Handle QR scan ----
+  // ---- Handle QR scan (LOCAL ONLY — no backend call) ----
   const handleScan = useCallback(
-    async (data: string) => {
-      setShowScanner(false);
+    (data: string) => {
       clearError();
 
-      // Extract serial number from QR data
-      // QR may contain a URL like https://app.example.com/qseal/QSL7A3B2C1D
-      // or just a raw serial like QSL7A3B2C1D
-      let serialNumber = data.trim();
-      if (serialNumber.includes('/')) {
-        const parts = serialNumber.split('/');
-        serialNumber = parts[parts.length - 1];
-      }
-      // Remove any query params
-      if (serialNumber.includes('?')) {
-        serialNumber = serialNumber.split('?')[0];
-      }
-
-      if (!serialNumber) {
-        Alert.alert('Invalid QR', 'Could not extract a serial number from the QR code.');
+      const serial = extractSerial(data);
+      if (!serial) {
+        Alert.alert('Invalid QR', 'Could not extract a serial number from this QR code.');
         return;
       }
 
-      try {
-        const node = await qsealService.scanQSeal(orgId, {
-          serial_number: serialNumber,
-          device_type: DEVICE_TYPE,
-          os: OS,
-          ip_address: '',
-        });
+      setLastScanned(serial);
 
-        await addScannedNode(node);
-      } catch (err: any) {
-        const detail = err.response?.data?.detail || err.message || 'Failed to scan QSeal.';
-        Alert.alert('Scan Error', detail);
+      // First scan → set as parent, subsequent scans → children
+      if (!parent) {
+        setParent(serial);
+      } else {
+        addChild(serial);
       }
     },
-    [orgId, addScannedNode, clearError]
+    [parent, setParent, addChild, clearError]
   );
 
-  // ---- Open scanner for parent ----
-  const handleScanParent = () => {
-    if (parent) {
-      Alert.alert(
-        'Parent Already Set',
-        'A parent is already selected. Reset the cascade first to scan a new parent.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Reset', style: 'destructive', onPress: resetCascade },
-        ]
-      );
-      return;
-    }
-    setScannerTitle('Scan Parent QSeal');
-    setScannerSubtitle('Scan a Container, Pallet, or Shipper QR');
-    setIsScanningChild(false);
-    setShowScanner(true);
-  };
-
-  // ---- Open scanner for child ----
-  const handleScanChild = () => {
-    if (!parent && cascadeMode === 'none') {
-      // No parent yet — this will be child-first mode
-      setScannerTitle('Scan Child QSeal');
-      setScannerSubtitle('Scan child QR codes (Box, Unit, Shipper)');
-      setIsScanningChild(true);
-      setShowScanner(true);
-      return;
-    }
-
-    if (parent && isParentFull()) {
-      Alert.alert(
-        'Capacity Full',
-        `Parent ${parent.name} is at full capacity (${parent.children_count}/${parent.capacity}). No more children can be added.`,
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    setScannerTitle('Scan Child QSeal');
-    setScannerSubtitle(parent ? `Linking to: ${parent.name}` : 'Scan child QR codes');
-    setIsScanningChild(true);
-    setShowScanner(true);
-  };
-
-  // ---- Handle link / finalize ----
+  // ---- Review → finalize (sends map request to backend) ----
   const handleFinalize = async () => {
-    setShowLinkPopup(false);
+    setPhase('submitting');
     const result = await finalizeCascade();
-    if (!result) {
-      // Error is already set in store
+    if (result) {
+      setPhase('success');
+    } else {
       Alert.alert('Link Failed', error || 'Failed to link QSeals.');
+      setPhase('review');
     }
   };
 
-  // ---- Dismiss success popup ----
-  const handleDismissSuccess = () => {
-    setShowSuccessPopup(false);
-    // Don't fully reset — keep parent so user can continue adding more children
-    useQSealStore.setState({ lastMapResult: null });
+  // ---- Start new session ----
+  const handleNewSession = () => {
+    resetCascade();
+    setLastScanned(null);
+    setPhase('idle');
   };
 
-  // ---- Render parent capacity bar ----
-  const renderCapacityBar = () => {
-    if (!parent || parent.capacity == null) return null;
+  const handleStartScan = () => {
+    resetCascade();
+    setLastScanned(null);
+    setPhase('scanning');
+  };
 
-    const totalAfter = parent.children_count + children.length;
-    const pct = Math.min(100, (totalAfter / parent.capacity) * 100);
-    const isFull = totalAfter >= parent.capacity;
-    const isNearFull = pct >= 80 && !isFull;
-
+  // ============ RENDER: Idle ============
+  if (phase === 'idle') {
     return (
-      <View style={styles.capacitySection}>
-        <View style={styles.capacityLabels}>
-          <Text style={styles.capacityText}>Capacity</Text>
-          <Text style={[styles.capacityCount, isFull && styles.capacityCountFull]}>
-            {totalAfter}/{parent.capacity}
-            {isFull ? ' FULL' : ''}
-          </Text>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Link Parent & Child</Text>
+          <View style={styles.backBtn} />
         </View>
-        <View style={styles.capacityBarBg}>
-          <View
-            style={[
-              styles.capacityBarFill,
-              {
-                width: `${pct}%`,
-                backgroundColor: isFull ? '#EF4444' : isNearFull ? '#F59E0B' : '#22C55E',
-              },
-            ]}
-          />
+
+        <View style={styles.idleContent}>
+          <Text style={styles.idleIcon}>🔗</Text>
+          <Text style={styles.idleTitle}>QSeal Cascade</Text>
+          <Text style={styles.idleSubtitle}>
+            Scan a parent QSeal first, then scan child QSeals.{'\n'}
+            All scans happen locally — only the final link is sent to the backend.
+          </Text>
+          <TouchableOpacity style={styles.idleScanBtn} onPress={handleStartScan}>
+            <Text style={styles.idleScanBtnText}>Start Scanning</Text>
+          </TouchableOpacity>
         </View>
-        {isFull && (
-          <Text style={styles.capacityWarning}>
-            ⚠️ Parent is at full capacity. No more children can be added.
-          </Text>
-        )}
-        {isNearFull && !isFull && (
-          <Text style={styles.capacityNearFull}>
-            Approaching capacity: {parent.capacity - totalAfter} slots remaining.
-          </Text>
-        )}
       </View>
     );
-  };
+  }
 
-  // ---- Determine if we can finalize ----
-  const canFinalize = parent && children.length > 0 && !isSubmitting;
-  const showManualLinkButton = cascadeMode === 'parent-first' && parent && children.length > 0;
+  // ============ RENDER: Scanning ============
+  if (phase === 'scanning') {
+    const totalCount = (parent ? 1 : 0) + children.length;
 
-  return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* ---- Header ---- */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Link Parent & Child</Text>
-        <TouchableOpacity onPress={resetCascade} style={styles.resetBtn}>
-          <Text style={styles.resetBtnText}>Reset</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner}>
-        {/* ---- Flow indicator ---- */}
-        {cascadeMode === 'none' && (
-          <View style={styles.flowHint}>
-            <Text style={styles.flowHintIcon}>🔗</Text>
-            <Text style={styles.flowHintText}>
-              Scan a parent or child QSeal to start. You can scan in any order.
+    return (
+      <View style={styles.container}>
+        {/* Status bar */}
+        <View style={styles.statusBar}>
+          <View style={styles.statusLeft}>
+            <Text style={styles.statusLabel}>
+              {parent ? '🔒 Parent set' : '📱 Waiting for parent'}
             </Text>
+            {parent && (
+              <Text style={styles.statusParentSerial} numberOfLines={1}>
+                {parent.serialNumber}
+              </Text>
+            )}
           </View>
-        )}
-
-        {cascadeMode === 'child-first' && !parent && (
-          <View style={styles.flowHint}>
-            <Text style={styles.flowHintIcon}>📦</Text>
-            <Text style={styles.flowHintText}>
-              {children.length} child QSeal(s) scanned. Now scan the parent to link them.
-            </Text>
+          <View style={styles.statusRight}>
+            <Text style={styles.statusCount}>{totalCount}</Text>
+            <Text style={styles.statusCountLabel}>scans</Text>
           </View>
-        )}
-
-        {cascadeMode === 'parent-first' && parent && (
-          <View style={styles.flowHint}>
-            <Text style={styles.flowHintIcon}>📋</Text>
-            <Text style={styles.flowHintText}>
-              Parent selected. Scan child QSeals to add to the cascade.
-            </Text>
-          </View>
-        )}
-
-        {/* ---- Error banner ---- */}
-        {error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{error}</Text>
-            <TouchableOpacity onPress={clearError}>
-              <Text style={styles.errorDismiss}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ---- Parent Card ---- */}
-        {parent && (
-          <View style={styles.parentCard}>
-            <View style={styles.parentCardHeader}>
-              <Text style={styles.parentBadge}>PARENT</Text>
-              <Text style={styles.parentType}>{parent.qseal_type.toUpperCase()}</Text>
-            </View>
-            <Text style={styles.parentName}>{parent.name}</Text>
-            <Text style={styles.parentSerial}>{parent.serial_number}</Text>
-            {renderCapacityBar()}
-          </View>
-        )}
-
-        {/* ---- Children Batch ---- */}
-        {children.length > 0 && (
-          <View style={styles.childrenSection}>
-            <Text style={styles.sectionTitle}>
-              Children ({children.length})
-            </Text>
-            {children.map((child, idx) => (
-              <View key={child.node_id} style={styles.childRow}>
-                <View style={styles.childInfo}>
-                  <Text style={styles.childIndex}>#{idx + 1}</Text>
-                  <View style={styles.childDetails}>
-                    <Text style={styles.childName}>{child.name}</Text>
-                    <Text style={styles.childMeta}>
-                      {child.serial_number} · {child.qseal_type}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  style={styles.childRemoveBtn}
-                  onPress={() => removeChild(child.node_id)}
-                >
-                  <Text style={styles.childRemoveBtnText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ---- Action Buttons ---- */}
-        <View style={styles.actions}>
-          {/* Scan Parent Button */}
-          {!parent && (
-            <TouchableOpacity style={styles.scanBtn} onPress={handleScanParent}>
-              <Text style={styles.scanBtnIcon}>🏷️</Text>
-              <Text style={styles.scanBtnText}>Scan Parent QSeal</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Scan Child Button */}
-          <TouchableOpacity
-            style={[styles.scanBtn, styles.scanChildBtn]}
-            onPress={handleScanChild}
-          >
-            <Text style={styles.scanBtnIcon}>📦</Text>
-            <Text style={styles.scanBtnText}>
-              {parent && isParentFull() ? 'Parent Full' : 'Scan Child QSeal'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Manual Link Complete Button (parent-first flow) */}
-          {showManualLinkButton && (
-            <TouchableOpacity
-              style={[styles.linkBtn, isSubmitting && styles.btnDisabled]}
-              onPress={() => setShowLinkPopup(true)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Text style={styles.linkBtnIcon}>✅</Text>
-                  <Text style={styles.linkBtnText}>
-                    Link Complete ({children.length} child
-                    {children.length > 1 ? 'ren' : ''})
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
         </View>
-      </ScrollView>
 
-      {/* ---- QR Scanner Modal ---- */}
-      <Modal
-        visible={showScanner}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setShowScanner(false)}
-      >
+        {/* Last scanned feedback */}
+        {lastScanned && (
+          <View style={styles.scanToast}>
+            <Text style={styles.scanToastText}>
+              ✅ {lastScanned}
+              {parent && lastScanned === parent.serialNumber ? ' (Parent)' : ' (Child)'}
+            </Text>
+          </View>
+        )}
+
+        {/* QR Scanner */}
         <QrScanner
           onScan={handleScan}
-          onClose={() => setShowScanner(false)}
-          title={scannerTitle}
-          subtitle={scannerSubtitle}
+          title={parent ? 'Scan Child QSeals' : 'Scan Parent QSeal'}
+          subtitle={
+            parent
+              ? `${children.length} child serial(s) scanned`
+              : 'First scan will be set as the parent'
+          }
         />
-      </Modal>
 
-      {/* ---- Link Confirmation Popup ---- */}
-      <Modal
-        visible={showLinkPopup}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLinkPopup(false)}
-      >
-        <View style={styles.popupOverlay}>
-          <View style={styles.popupCard}>
-            <Text style={styles.popupIcon}>
-              {isParentFull() && parent ? '⚠️' : '🔗'}
+        {/* Bottom actions */}
+        <View style={styles.bottomActions}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleNewSession}>
+            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.primaryButton,
+              (!parent || children.length === 0) && styles.buttonDisabled,
+            ]}
+            onPress={() => setPhase('review')}
+            disabled={!parent || children.length === 0}
+          >
+            <Text style={styles.primaryButtonText}>
+              Review ({children.length} children)
             </Text>
-            <Text style={styles.popupTitle}>
-              {isParentFull() && parent
-                ? 'Capacity Limit Reached'
-                : 'Link QSeals?'}
-            </Text>
-
-            {parent && (
-              <View style={styles.popupInfo}>
-                <Text style={styles.popupLabel}>Parent</Text>
-                <Text style={styles.popupValue}>{parent.name} ({parent.serial_number})</Text>
-                {parent.capacity != null && (
-                  <Text style={[
-                    styles.popupCapacity,
-                    isParentFull() && styles.popupCapacityFull,
-                  ]}>
-                    Capacity: {parent.children_count + children.length}/{parent.capacity}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            <View style={styles.popupInfo}>
-              <Text style={styles.popupLabel}>Children to Link</Text>
-              <Text style={styles.popupValue}>{children.length} QSeal(s)</Text>
-            </View>
-
-            {isParentFull() && parent && (
-              <View style={styles.popupWarning}>
-                <Text style={styles.popupWarningText}>
-                  ⚠️ Parent capacity is full! Some children may not be linked if the count exceeds available slots.
-                </Text>
-              </View>
-            )}
-
-            {!isParentFull() && parent && parent.capacity != null && (
-              <View style={styles.popupOk}>
-                <Text style={styles.popupOkText}>
-                  ✅ {parent.capacity - parent.children_count - children.length} slots remaining after this link.
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.popupActions}>
-              <TouchableOpacity
-                style={styles.popupCancelBtn}
-                onPress={() => setShowLinkPopup(false)}
-                disabled={isSubmitting}
-              >
-                <Text style={styles.popupCancelText}>
-                  {isParentFull() ? 'Review' : 'Cancel'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.popupConfirmBtn, isSubmitting && styles.btnDisabled]}
-                onPress={handleFinalize}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.popupConfirmText}>Link Now</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </View>
+    );
+  }
 
-      {/* ---- Success Popup ---- */}
-      <Modal
-        visible={showSuccessPopup}
-        transparent
-        animationType="fade"
-        onRequestClose={handleDismissSuccess}
-      >
-        <View style={styles.popupOverlay}>
-          <View style={styles.popupCard}>
-            <Text style={styles.popupIcon}>✅</Text>
-            <Text style={styles.popupTitle}>Cascade Complete</Text>
-            <Text style={styles.popupMessage}>
-              {lastMapResult?.mapped_count} QSeal(s) linked to {parent?.name || 'parent'}.
-            </Text>
-            <TouchableOpacity style={styles.popupConfirmBtn} onPress={handleDismissSuccess}>
-              <Text style={styles.popupConfirmText}>Done</Text>
-            </TouchableOpacity>
-          </View>
+  // ============ RENDER: Review ============
+  if (phase === 'review') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => setPhase('scanning')} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>← Scan</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Review Cascade</Text>
+          <View style={styles.backBtn} />
         </View>
-      </Modal>
-    </View>
-  );
+
+        <ScrollView style={styles.content} contentContainerStyle={styles.reviewContent}>
+          {/* Parent card */}
+          {parent && (
+            <View style={styles.reviewCard}>
+              <Text style={styles.reviewSectionTitle}>Parent</Text>
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Serial</Text>
+                <Text style={styles.reviewValueMono}>{parent.serialNumber}</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Children list */}
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewSectionTitle}>
+              Children ({children.length})
+            </Text>
+            {children.length === 0 ? (
+              <Text style={styles.emptyText}>No children scanned yet.</Text>
+            ) : (
+              children.map((child, idx) => (
+                <View key={child.serialNumber} style={styles.itemRow}>
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemIndex}>#{idx + 1}</Text>
+                    <Text style={styles.itemSerial}>{child.serialNumber}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => removeChild(child.serialNumber)}
+                  >
+                    <Text style={styles.removeButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+
+          {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {/* Actions */}
+          <TouchableOpacity
+            style={[styles.linkCompleteBtn, isSubmitting && styles.buttonDisabled]}
+            onPress={handleFinalize}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.linkCompleteBtnText}>
+                Link Complete ({children.length} child{children.length > 1 ? 'ren' : ''})
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.addMoreBtn} onPress={() => setPhase('scanning')}>
+            <Text style={styles.addMoreBtnText}>+ Add More Children</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ============ RENDER: Submitting ============
+  if (phase === 'submitting') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.idleContent}>
+          <ActivityIndicator size="large" color="#1A73E8" />
+          <Text style={styles.submittingText}>Linking QSeals...</Text>
+          <Text style={styles.submittingDetail}>
+            {parent?.serialNumber} ← {children.length} child serial(s)
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // ============ RENDER: Success ============
+  if (phase === 'success') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Cascade Complete</Text>
+          <View style={styles.backBtn} />
+        </View>
+
+        <View style={styles.idleContent}>
+          <Text style={styles.successIcon}>✅</Text>
+          <Text style={styles.successTitle}>Linked Successfully</Text>
+          <Text style={styles.successMessage}>
+            {lastMapResult?.mapped_count} child QSeal(s) linked to parent{' '}
+            {parent?.serialNumber || ''}.
+          </Text>
+
+          <TouchableOpacity style={styles.idleScanBtn} onPress={handleNewSession}>
+            <Text style={styles.idleScanBtnText}>New Cascade</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.idleScanBtn, styles.doneBtn]}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.idleScanBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -502,390 +368,87 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A2332',
     borderBottomWidth: 1,
     borderBottomColor: '#2A3A4A',
+    paddingTop: 55,
   },
-  backBtn: {
-    paddingVertical: 4,
-    paddingRight: 12,
+  backBtn: { paddingVertical: 4, paddingHorizontal: 4, minWidth: 50 },
+  backBtnText: { color: '#1A73E8', fontSize: 15, fontWeight: '600' },
+  headerTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
+
+  // ---- Idle ----
+  idleContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
   },
-  backBtnText: {
-    color: '#1A73E8',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  resetBtn: {
-    paddingVertical: 4,
-    paddingLeft: 12,
-  },
-  resetBtnText: {
-    color: '#EF4444',
+  idleIcon: { fontSize: 56, marginBottom: 16 },
+  idleTitle: { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 12 },
+  idleSubtitle: {
+    color: '#8899AA',
     fontSize: 14,
-    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 32,
   },
-
-  // ---- Content ----
-  content: {
-    flex: 1,
-  },
-  contentInner: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-
-  // ---- Flow Hint ----
-  flowHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1A2332',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  flowHintIcon: {
-    fontSize: 22,
-    marginRight: 10,
-  },
-  flowHintText: {
-    color: '#B0C4D8',
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 18,
-  },
-
-  // ---- Error Banner ----
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239,68,68,0.15)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-  },
-  errorBannerText: {
-    color: '#EF4444',
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 18,
-  },
-  errorDismiss: {
-    color: '#EF4444',
-    fontSize: 16,
-    fontWeight: '700',
-    paddingLeft: 8,
-  },
-
-  // ---- Parent Card ----
-  parentCard: {
-    backgroundColor: '#1A2332',
+  idleScanBtn: {
+    backgroundColor: '#1A73E8',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  parentCardHeader: {
-    flexDirection: 'row',
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    width: '100%',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  parentBadge: {
-    color: '#1A73E8',
-    fontSize: 11,
-    fontWeight: '800',
-    backgroundColor: 'rgba(26,115,232,0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    marginRight: 8,
-    overflow: 'hidden',
-    letterSpacing: 0.5,
-  },
-  parentType: {
-    color: '#8899AA',
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  parentName: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  parentSerial: {
-    color: '#667788',
-    fontSize: 13,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    marginBottom: 12,
-  },
+  idleScanBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  doneBtn: { backgroundColor: '#1A2332', borderWidth: 1, borderColor: '#2A3A4A', marginTop: 12 },
 
-  // ---- Capacity Bar ----
-  capacitySection: {
-    marginTop: 4,
-  },
-  capacityLabels: {
+  // ---- Scanning ----
+  statusBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
-  },
-  capacityText: {
-    color: '#8899AA',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  capacityCount: {
-    color: '#B0C4D8',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  capacityCountFull: {
-    color: '#EF4444',
-  },
-  capacityBarBg: {
-    height: 6,
-    backgroundColor: '#2A3A4A',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  capacityBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  capacityWarning: {
-    color: '#EF4444',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  capacityNearFull: {
-    color: '#F59E0B',
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 8,
-  },
-
-  // ---- Children Section ----
-  childrenSection: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: '#8899AA',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  childRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingTop: 55,
     backgroundColor: '#1A2332',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
   },
-  childInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  childIndex: {
+  statusLeft: { flex: 1 },
+  statusLabel: { color: '#8899AA', fontSize: 13, fontWeight: '600' },
+  statusParentSerial: {
     color: '#1A73E8',
-    fontSize: 14,
-    fontWeight: '700',
-    width: 30,
-  },
-  childDetails: {
-    flex: 1,
-  },
-  childName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  childMeta: {
-    color: '#667788',
-    fontSize: 11,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     marginTop: 2,
   },
-  childRemoveBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(239,68,68,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  childRemoveBtnText: {
-    color: '#EF4444',
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  statusRight: { alignItems: 'center' },
+  statusCount: { color: '#fff', fontSize: 24, fontWeight: '800' },
+  statusCountLabel: { color: '#667788', fontSize: 10, fontWeight: '600' },
 
-  // ---- Actions ----
-  actions: {
-    gap: 10,
-  },
-  scanBtn: {
-    flexDirection: 'row',
+  scanToast: {
+    position: 'absolute',
+    top: 55 + 52,
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(34,197,94,0.9)',
+    borderRadius: 8,
+    padding: 10,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1A2332',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
   },
-  scanChildBtn: {
-    borderColor: '#22C55E33',
-    backgroundColor: '#1A2332',
-  },
-  scanBtnIcon: {
-    fontSize: 18,
-    marginRight: 10,
-  },
-  scanBtnText: {
-    color: '#B0C4D8',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  linkBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#22C55E',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 4,
-  },
-  linkBtnIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  linkBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  btnDisabled: {
-    opacity: 0.5,
-  },
+  scanToastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 
-  // ---- Popups (shared) ----
-  popupOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  popupCard: {
-    backgroundColor: '#1A2332',
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    maxWidth: 360,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  popupIcon: {
-    fontSize: 44,
-    marginBottom: 12,
-  },
-  popupTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  popupMessage: {
-    color: '#B0C4D8',
-    fontSize: 15,
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 22,
-  },
-  popupInfo: {
-    width: '100%',
-    backgroundColor: '#0F1923',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-  },
-  popupLabel: {
-    color: '#8899AA',
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  popupValue: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  popupCapacity: {
-    color: '#22C55E',
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: '600',
-  },
-  popupCapacityFull: {
-    color: '#EF4444',
-  },
-  popupWarning: {
-    width: '100%',
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.25)',
-  },
-  popupWarningText: {
-    color: '#EF4444',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  popupOk: {
-    width: '100%',
-    backgroundColor: 'rgba(34,197,94,0.1)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.2)',
-  },
-  popupOkText: {
-    color: '#22C55E',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  popupActions: {
+  bottomActions: {
     flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingBottom: 20,
     gap: 12,
-    width: '100%',
+    backgroundColor: '#1A2332',
+    borderTopWidth: 1,
+    borderTopColor: '#2A3A4A',
   },
-  popupCancelBtn: {
+  secondaryButton: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
@@ -893,21 +456,113 @@ const styles = StyleSheet.create({
     borderColor: '#2A3A4A',
     alignItems: 'center',
   },
-  popupCancelText: {
-    color: '#8899AA',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  popupConfirmBtn: {
-    flex: 1,
+  secondaryButtonText: { color: '#8899AA', fontSize: 14, fontWeight: '600' },
+  primaryButton: {
+    flex: 2,
     paddingVertical: 12,
     borderRadius: 8,
     backgroundColor: '#1A73E8',
     alignItems: 'center',
   },
-  popupConfirmText: {
+  primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  buttonDisabled: { opacity: 0.4 },
+
+  // ---- Review ----
+  content: { flex: 1 },
+  reviewContent: { padding: 16, paddingBottom: 40 },
+  reviewCard: {
+    backgroundColor: '#1A2332',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  reviewSectionTitle: {
+    color: '#8899AA',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  reviewLabel: { color: '#667788', fontSize: 13 },
+  reviewValue: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  reviewValueMono: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+
+  emptyText: { color: '#667788', fontSize: 13, fontStyle: 'italic', paddingVertical: 8 },
+
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  itemInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  itemIndex: { color: '#1A73E8', fontSize: 13, fontWeight: '700', width: 32 },
+  itemSerial: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
+  removeButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: { color: '#EF4444', fontSize: 12, fontWeight: '700' },
+
+  errorText: {
+    color: '#EF4444',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+
+  // ---- Review Actions ----
+  linkCompleteBtn: {
+    backgroundColor: '#22C55E',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  linkCompleteBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  addMoreBtn: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  addMoreBtnText: { color: '#1A73E8', fontSize: 14, fontWeight: '600' },
+
+  // ---- Submitting ----
+  submittingText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 20 },
+  submittingDetail: { color: '#667788', fontSize: 13, marginTop: 8, textAlign: 'center' },
+
+  // ---- Success ----
+  successIcon: { fontSize: 56, marginBottom: 16 },
+  successTitle: { color: '#fff', fontSize: 22, fontWeight: '700', marginBottom: 10 },
+  successMessage: { color: '#B0C4D8', fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 32 },
 });
