@@ -65,6 +65,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         sessionSummary: null,
         lastScan: null,
         generatedSlip: null,
+        linkedUnitsParent: null,
         isLoading: false,
       });
     } catch (error: any) {

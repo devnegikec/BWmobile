@@ -26,6 +26,13 @@ type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 export default function InboundScreen({ navigation }: any) {
   const { selectedWarehouse, user, worker } = useAuthStore();
   const orgId = user?.organization_id || worker?.organization_id || '';
+  console.log('[Inbound] orgId sources:', {
+    userOrgId: user?.organization_id,
+    workerOrgId: worker?.organization_id,
+    userKeys: user ? Object.keys(user) : 'null',
+    workerKeys: worker ? Object.keys(worker) : 'null',
+    final: orgId,
+  });
   const {
     currentSession,
     sessionSummary,
@@ -73,6 +80,7 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
     try {
+      clearLinkedUnits(); // Clear any linked units from previous session
       await startSession(selectedWarehouse.id, dockLocation.trim());
       setStep('scanning');
     } catch (err: any) {
@@ -81,12 +89,23 @@ export default function InboundScreen({ navigation }: any) {
   };
 
   // ---- Extract serial from QSeal URL, or null if not a QSeal QR ----
+  // Supports both URL patterns:
+  //   Pattern A: /qseal/{SERIAL}        e.g. https://.../qseal/QSL5E248FC
+  //   Pattern B: /s/{SERIAL}/{...}      e.g. https://.../g/SKU/s/JV9HKW/12345
   const extractQSealSerial = (qrData: string): string | null => {
     const trimmed = qrData.trim();
     if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
     try {
       const url = new URL(trimmed);
       const pathParts = url.pathname.split('/').filter(Boolean);
+
+      // Pattern A: /qseal/{SERIAL}
+      const qsealIdx = pathParts.indexOf('qseal');
+      if (qsealIdx !== -1 && qsealIdx + 1 < pathParts.length) {
+        return pathParts[qsealIdx + 1];
+      }
+
+      // Pattern B: /s/{SERIAL}/...
       const sIdx = pathParts.indexOf('s');
       if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
         return pathParts[sIdx + 1];
@@ -121,7 +140,13 @@ export default function InboundScreen({ navigation }: any) {
 
   // ---- QSeal parent scan: Step 1→2→3 ----
   const handleQSealScan = async (serial: string) => {
-    console.log('[Inbound] QSeal scan started, serial:', serial);
+    console.log('[Inbound] QSeal scan started, serial:', serial, 'orgId:', orgId);
+
+    if (!orgId) {
+      Alert.alert('Error', 'Organization ID not found. Please log out and log in again.');
+      return;
+    }
+
     setIsProcessingQSeal(true);
     try {
       // Step 1: Resolve serial → get parent UUID
@@ -134,8 +159,9 @@ export default function InboundScreen({ navigation }: any) {
       });
       console.log('[Inbound] Step 1 OK: node_id:', node.node_id, 'type:', node.qseal_type);
 
-      // Step 2: Fetch linked units
+      // Step 2: Fetch linked units (clear old ones first)
       console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
+      useInboundStore.setState({ linkedUnitsParent: null }); // wipe old data
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
       console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
       fetchLinkedUnitsDirect(parentWithUnits);

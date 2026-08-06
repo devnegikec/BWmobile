@@ -22,56 +22,49 @@ import * as qsealService from '../api/qsealService';
 type Phase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
 
 // ---- Serial number extraction ----
-// URL pattern: https://v0-horizon-sync.vercel.app/g/{sku}/s/{SERIAL}/{...}?c=...
-// The serial is the path segment immediately after /s/
-function extractSerial(data: string): string | null {
+// Supports both URL patterns and returns the type:
+//   Pattern A: /qseal/{SERIAL}        → parent QSeal
+//   Pattern B: /s/{SERIAL}/{...}      → child unit
+function extractSerial(data: string): { serial: string; isParent: boolean } | null {
   const trimmed = data.trim();
 
-  // If it's a URL, parse the path
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
       const url = new URL(trimmed);
       const pathParts = url.pathname.split('/').filter(Boolean);
 
-      // Find /s/ segment — serial is the next segment
+      // Pattern A: /qseal/{SERIAL} → PARENT
+      const qsealIdx = pathParts.indexOf('qseal');
+      if (qsealIdx !== -1 && qsealIdx + 1 < pathParts.length) {
+        return { serial: pathParts[qsealIdx + 1], isParent: true };
+      }
+
+      // Pattern B: /s/{SERIAL}/... → CHILD
       const sIdx = pathParts.indexOf('s');
       if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
-        return pathParts[sIdx + 1];
+        return { serial: pathParts[sIdx + 1], isParent: false };
       }
-
-      // Fallback: last path segment (if it looks like a serial, not a number-only timestamp)
-      if (pathParts.length > 0) {
-        const last = pathParts[pathParts.length - 1];
-        // Skip pure-numeric segments (likely timestamps like 1785994326500)
-        if (last && !/^\d{10,}$/.test(last)) {
-          return last;
-        }
-        // Second-to-last if last is numeric
-        if (pathParts.length >= 2) {
-          const secondLast = pathParts[pathParts.length - 2];
-          if (secondLast && !/^\d+$/.test(secondLast)) {
-            return secondLast;
-          }
-        }
-      }
-
-      return null;
-    } catch {
-      // Fall through to raw string handling
-    }
+    } catch {}
+    return null;
   }
 
-  // Raw serial (e.g., "JV9HKW" or "QSL7A3B2C1D")
+  // Raw serial — treat as parent by default
   if (trimmed.length >= 2 && trimmed.length <= 50) {
-    return trimmed;
+    return { serial: trimmed, isParent: true };
   }
 
   return null;
 }
 
 export default function QsealCascadeScreen({ navigation }: any) {
-  const { user, worker } = useAuthStore();
+  const { user, worker, selectedWarehouse } = useAuthStore();
+  // Try multiple sources for organization_id
   const orgId = user?.organization_id || worker?.organization_id || '';
+  console.log('[QSealCascade] orgId sources:', {
+    userOrgId: user?.organization_id,
+    workerOrgId: worker?.organization_id,
+    final: orgId,
+  });
 
   const {
     parent,
@@ -96,9 +89,17 @@ export default function QsealCascadeScreen({ navigation }: any) {
     async (data: string) => {
       clearError();
 
-      const serial = extractSerial(data);
-      if (!serial) {
+      const result = extractSerial(data);
+      if (!result) {
         Alert.alert('Invalid QR', 'Could not extract a serial number from this QR code.');
+        return;
+      }
+
+      const { serial, isParent: detectedAsParent } = result;
+      console.log('[QSealCascade] scan:', { serial, detectedAsParent, orgId });
+
+      if (!orgId) {
+        Alert.alert('Error', 'Organization ID not found. Please log out and log in again.');
         return;
       }
 
@@ -113,8 +114,10 @@ export default function QsealCascadeScreen({ navigation }: any) {
 
         setLastScanned(serial);
 
-        // First scan → set as parent, subsequent scans → children
-        if (!parent) {
+        // URL type detection:
+        //   /qseal/{SERIAL} → parent (or first scan if no parent yet)
+        //   /s/{SERIAL}/... → child
+        if (detectedAsParent && !parent) {
           setParent(serial, node.node_id);
         } else {
           addChild(serial, node.node_id);
