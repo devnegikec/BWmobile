@@ -133,12 +133,17 @@ export default function QsealCascadeScreen({ navigation }: any) {
 
   // ---- Review → finalize (sends map request to backend) ----
   const handleFinalize = async () => {
+    console.log('[QSealCascade] handleFinalize called');
     setPhase('submitting');
     const result = await finalizeCascade();
+    console.log('[QSealCascade] finalizeCascade result:', result);
     if (result) {
       setPhase('success');
     } else {
-      Alert.alert('Link Failed', error || 'Failed to link QSeals.');
+      // Read error fresh from store — avoid stale closure value
+      const storeError = useQSealStore.getState().error;
+      console.log('[QSealCascade] finalize failed, error:', storeError);
+      Alert.alert('Link Failed', storeError || 'Failed to link QSeals.');
       setPhase('review');
     }
   };

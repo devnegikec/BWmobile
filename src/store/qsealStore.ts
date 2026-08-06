@@ -136,9 +136,14 @@ export const useQSealStore = create<QSealState>((set, get) => ({
     set({ isSubmitting: true, error: null });
     try {
       // Send UUIDs (node_id from scan API) to the map endpoint
+      console.log('[QSeal] Calling map API:', {
+        url: `/qseal/parents/${parent.nodeId}/map`,
+        child_ids: children.map((c) => c.nodeId),
+      });
       const result = await qsealService.mapChildren(parent.nodeId, {
         child_ids: children.map((c) => c.nodeId),
       });
+      console.log('[QSeal] Map API success:', result);
       set({
         isSubmitting: false,
         lastMapResult: { mapped_count: result.mapped_count, message: result.message },
