@@ -274,6 +274,8 @@ export interface QSealHistoryItem {
 export interface LinkedUnit {
   id: string;
   serial_number: string;
+  product_name?: string;
+  product_sku?: string;
   manufacturing_date: string;
   expiry_date: string;
   dispatch_batch: string;

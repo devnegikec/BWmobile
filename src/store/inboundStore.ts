@@ -24,8 +24,8 @@ interface InboundState {
   isLoading: boolean;
   error: string | null;
 
-  // QSeal linked units (fetched when a parent QSeal is scanned during inbound)
-  linkedUnitsParent: QSealParentWithUnits | null;
+  // QSeal linked units (accumulated across multiple parent scans)
+  linkedUnitsParents: QSealParentWithUnits[];
   isFetchingLinkedUnits: boolean;
 
   // Actions
@@ -48,7 +48,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   isScanning: false,
   isLoading: false,
   error: null,
-  linkedUnitsParent: null,
+  linkedUnitsParents: [],
   isFetchingLinkedUnits: false,
 
   // ---------- Start Session ----------
@@ -65,7 +65,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         sessionSummary: null,
         lastScan: null,
         generatedSlip: null,
-        linkedUnitsParent: null,
+        linkedUnitsParents: [],
         isLoading: false,
       });
     } catch (error: any) {
@@ -136,7 +136,10 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     set({ isFetchingLinkedUnits: true, error: null });
     try {
       const data = await qsealService.getLinkedUnits(parentId);
-      set({ linkedUnitsParent: data, isFetchingLinkedUnits: false });
+      set((state) => ({
+        linkedUnitsParents: [...state.linkedUnitsParents, data],
+        isFetchingLinkedUnits: false,
+      }));
     } catch (error: any) {
       const detail = error.response?.data?.detail || error.message || 'Failed to fetch linked units.';
       const msg = typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail));
@@ -145,7 +148,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     }
   },
 
-  clearLinkedUnits: () => set({ linkedUnitsParent: null }),
+  clearLinkedUnits: () => set({ linkedUnitsParents: [] }),
 
   // ---------- Load Summary ----------
   loadSummary: async () => {
@@ -225,7 +228,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       sessionSummary: null,
       lastScan: null,
       generatedSlip: null,
-      linkedUnitsParent: null,
+      linkedUnitsParents: [],
       isScanning: false,
     }),
 

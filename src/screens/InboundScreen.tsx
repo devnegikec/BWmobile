@@ -23,6 +23,91 @@ import type { QSealParentWithUnits } from '../types';
 
 type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
+// ---- Expandable Linked Units Table ----
+function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const boxCount = parents.length;
+  const itemCount = parents.reduce((sum, p) => sum + p.linked_units.length, 0);
+
+  return (
+    <View style={styles.tableContainer}>
+      {/* Summary header */}
+      <View style={styles.tableHeader}>
+        <Text style={styles.tableHeaderText}>
+          📦 {boxCount} box{boxCount > 1 ? 'es' : ''} · 📋 {itemCount} item{itemCount > 1 ? 's' : ''}
+        </Text>
+      </View>
+
+      {/* Column headers */}
+      <View style={styles.tableColHeaders}>
+        <Text style={[styles.colHeader, styles.colProduct]}>Product</Text>
+        <Text style={[styles.colHeader, styles.colSku]}>SKU</Text>
+        <Text style={[styles.colHeader, styles.colBatch]}>Batch</Text>
+        <Text style={[styles.colHeader, styles.colBox]}>Box</Text>
+        <Text style={[styles.colHeader, styles.colQty]}>Qty</Text>
+      </View>
+
+      {/* Parent rows */}
+      {parents.map((parent, pIdx) => {
+        const isOpen = expanded.has(parent.id);
+        const firstUnit = parent.linked_units[0];
+        return (
+          <View key={parent.id}>
+            <TouchableOpacity
+              style={styles.parentRow}
+              onPress={() => toggleExpand(parent.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
+                {isOpen ? '▼ ' : '▶ '}{firstUnit?.product_name || parent.name}
+              </Text>
+              <Text style={[styles.cell, styles.colSku]} numberOfLines={1}>
+                {firstUnit?.product_sku || '-'}
+              </Text>
+              <Text style={[styles.cell, styles.colBatch]} numberOfLines={1}>
+                {firstUnit?.dispatch_batch || '-'}
+              </Text>
+              <Text style={[styles.cell, styles.colBox]}>
+                {pIdx + 1}/{boxCount}
+              </Text>
+              <Text style={[styles.cell, styles.colQty]}>
+                {parent.linked_units.length}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Expanded: unit details */}
+            {isOpen &&
+              parent.linked_units.map((unit) => (
+                <View key={unit.id} style={styles.unitRow}>
+                  <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
+                    {'    '}└ {unit.serial_number}
+                  </Text>
+                  <Text style={[styles.cell, styles.colSku]}>
+                    {unit.product_sku || '-'}
+                  </Text>
+                  <Text style={[styles.cell, styles.colBatch]}>
+                    {unit.dispatch_batch || '-'}
+                  </Text>
+                  <Text style={[styles.cell, styles.colBox]}> </Text>
+                  <Text style={[styles.cell, styles.colQty]}>1</Text>
+                </View>
+              ))}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function InboundScreen({ navigation }: any) {
   const { selectedWarehouse, user, worker } = useAuthStore();
   const orgId = user?.organization_id || worker?.organization_id || '';
@@ -41,7 +126,7 @@ export default function InboundScreen({ navigation }: any) {
     isScanning,
     isLoading,
     error,
-    linkedUnitsParent,
+    linkedUnitsParents,
     startSession,
     recordScan,
     clearLinkedUnits,
@@ -159,12 +244,14 @@ export default function InboundScreen({ navigation }: any) {
       });
       console.log('[Inbound] Step 1 OK: node_id:', node.node_id, 'type:', node.qseal_type);
 
-      // Step 2: Fetch linked units (clear old ones first)
+      // Step 2: Fetch linked units (appends to the list)
       console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
-      useInboundStore.setState({ linkedUnitsParent: null }); // wipe old data
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
       console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
-      fetchLinkedUnitsDirect(parentWithUnits);
+      // Add to store for display
+      useInboundStore.setState((s) => ({
+        linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
+      }));
 
       // Step 3: Record each linked unit's product_item_url as a scan
       if (parentWithUnits.linked_units.length > 0) {
@@ -188,10 +275,11 @@ export default function InboundScreen({ navigation }: any) {
           }
         }
         console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
+        const boxCount = useInboundStore.getState().linkedUnitsParents.length;
         if (scannedCount > 0) {
           Alert.alert(
             'QSeal Processed',
-            `${parentWithUnits.name}: ${scannedCount} linked unit(s) recorded from ${parentWithUnits.linked_units.length} total.`
+            `Box ${boxCount}: ${parentWithUnits.name}\n${scannedCount} item(s) recorded.`
           );
         }
       }
@@ -207,11 +295,6 @@ export default function InboundScreen({ navigation }: any) {
     } finally {
       setIsProcessingQSeal(false);
     }
-  };
-
-  // ---- Direct set (no re-fetch) ----
-  const fetchLinkedUnitsDirect = (data: typeof linkedUnitsParent) => {
-    useInboundStore.setState({ linkedUnitsParent: data });
   };
 
   const handleViewSummary = async () => {
@@ -328,33 +411,15 @@ export default function InboundScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* QSeal Linked Units (fetched when parent QSeal scanned) */}
+        {/* QSeal Linked Units — expandable table */}
         {isProcessingQSeal && (
           <View style={styles.linkedUnitsLoading}>
             <ActivityIndicator size="small" color="#1A73E8" />
             <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
           </View>
         )}
-        {linkedUnitsParent && linkedUnitsParent.linked_units.length > 0 && (
-          <View style={styles.linkedUnitsPanel}>
-            <View style={styles.linkedUnitsHeader}>
-              <Text style={styles.linkedUnitsTitle}>
-                🔗 {linkedUnitsParent.name} — {linkedUnitsParent.linked_units.length} linked unit(s)
-              </Text>
-            </View>
-            {linkedUnitsParent.linked_units.map((unit) => (
-              <View key={unit.id} style={styles.linkedUnitRow}>
-                <View style={styles.linkedUnitInfo}>
-                  <Text style={styles.linkedUnitSerial}>{unit.serial_number}</Text>
-                  <Text style={styles.linkedUnitBatch}>
-                    Batch: {unit.dispatch_batch}
-                    {unit.manufacturing_date ? ` · Mfg: ${unit.manufacturing_date}` : ''}
-                    {unit.expiry_date ? ` · Exp: ${unit.expiry_date}` : ''}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
+        {linkedUnitsParents.length > 0 && (
+          <LinkedUnitsTable parents={linkedUnitsParents} />
         )}
 
         {/* Action buttons */}
@@ -454,26 +519,10 @@ export default function InboundScreen({ navigation }: any) {
         </View>
 
         {/* QSeal Linked Units */}
-        {linkedUnitsParent && linkedUnitsParent.linked_units.length > 0 && (
+        {linkedUnitsParents.length > 0 && (
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>
-              🔗 Linked Units ({linkedUnitsParent.linked_units.length})
-            </Text>
-            <Text style={styles.linkedParentName}>
-              Parent: {linkedUnitsParent.name} ({linkedUnitsParent.serial_number})
-            </Text>
-            {linkedUnitsParent.linked_units.map((unit) => (
-              <View key={unit.id} style={styles.linkedUnitRow}>
-                <View style={styles.linkedUnitInfo}>
-                  <Text style={styles.linkedUnitSerial}>{unit.serial_number}</Text>
-                  <Text style={styles.linkedUnitBatch}>
-                    Batch: {unit.dispatch_batch}
-                    {unit.manufacturing_date ? ` · Mfg: ${unit.manufacturing_date}` : ''}
-                    {unit.expiry_date ? ` · Exp: ${unit.expiry_date}` : ''}
-                  </Text>
-                </View>
-              </View>
-            ))}
+            <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
+            <LinkedUnitsTable parents={linkedUnitsParents} />
           </View>
         )}
 
@@ -815,7 +864,57 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  // ---- Linked Units ----
+  // ---- Linked Units Table ----
+  tableContainer: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    overflow: 'hidden',
+    maxHeight: 220,
+  },
+  tableHeader: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  tableHeaderText: { color: '#4ADE80', fontSize: 12, fontWeight: '700' },
+  tableColHeaders: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#0F1923',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  colHeader: { color: '#667788', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  colProduct: { flex: 3, minWidth: 0 },
+  colSku: { flex: 2, minWidth: 0 },
+  colBatch: { flex: 2, minWidth: 0 },
+  colBox: { width: 40, textAlign: 'center' },
+  colQty: { width: 30, textAlign: 'center' },
+  parentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#0F1923',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A2332',
+  },
+  cell: { color: '#B0C4D8', fontSize: 12 },
+
   linkedUnitsLoading: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -824,30 +923,4 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
-  linkedUnitsPanel: {
-    backgroundColor: '#1A2332',
-    borderRadius: 10,
-    margin: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
-  },
-  linkedUnitsHeader: { marginBottom: 10 },
-  linkedUnitsTitle: { color: '#4ADE80', fontSize: 14, fontWeight: '700' },
-  linkedParentName: { color: '#667788', fontSize: 12, marginBottom: 8 },
-  linkedUnitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#0F1923',
-  },
-  linkedUnitInfo: { flex: 1 },
-  linkedUnitSerial: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  linkedUnitBatch: { color: '#8899AA', fontSize: 11, marginTop: 2 },
 });
