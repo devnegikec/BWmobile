@@ -148,6 +148,13 @@ export default function DashboardScreen({ navigation }: any) {
             <Text style={styles.cardTitle}>Slips</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('QsealCascade')}>
+            <View style={styles.cardIconBox}>
+              <Text style={styles.cardIcon}>🔗</Text>
+            </View>
+            <Text style={styles.cardTitle}>Link QSeal</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[styles.card, styles.cardDisabled]} disabled>
             <View style={styles.cardIconBox}>
               <Text style={styles.cardIcon}>📤</Text>

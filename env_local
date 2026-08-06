@@ -1,0 +1,16 @@
+# ============================================================
+# Railway Direct Service URLs
+# ============================================================
+# Mobile app now calls Railway-deployed microservices directly
+# instead of the legacy API Gateway (horizon.ciphercode.ai).
+# See: MOBILE_APP_RAILWAY_MIGRATION.md
+
+EXPO_PUBLIC_IDENTITY_URL=https://identity-service-production-a1eb.up.railway.app/api/v1
+EXPO_PUBLIC_CORE_URL=https://core-service-production-66e9.up.railway.app/api/v1
+EXPO_PUBLIC_SEARCH_URL=https://420a-2401-4900-619a-4bf0-89c0-e9f1-13b8-73fc.ngrok-free.app/api/v1
+
+# ---------- Network ----------
+EXPO_PUBLIC_REQUEST_TIMEOUT=15000
+
+# ---------- ngrok (search service is on free tier) ----------
+EXPO_PUBLIC_NGROK_SKIP_HEADER=true

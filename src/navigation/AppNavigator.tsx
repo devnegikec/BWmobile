@@ -15,6 +15,7 @@ import InboundScreen from '../screens/InboundScreen';
 import PutawayScreen from '../screens/PutawayScreen';
 import AssignBinScreen from '../screens/AssignBinScreen';
 import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
+import QsealCascadeScreen from '../screens/QsealCascadeScreen';
 import { useAuthStore } from '../store/authStore';
 
 // ---------- Type Definitions ----------
@@ -31,8 +32,14 @@ export type AppTabsParamList = {
   ReceivingSlips: undefined;
 };
 
+export type RootStackParamList = {
+  AppTabs: undefined;
+  QsealCascade: undefined;
+};
+
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const Tab = createBottomTabNavigator<AppTabsParamList>();
+const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 // ---------- Auth Navigator (Not logged in) ----------
 function AuthNavigator() {
@@ -142,7 +149,19 @@ export default function AppNavigator() {
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        {isAuthenticated ? <AppTabs /> : <AuthNavigator />}
+        {isAuthenticated ? (
+          <RootStack.Navigator
+            screenOptions={{
+              headerShown: false,
+              animation: 'slide_from_right',
+            }}
+          >
+            <RootStack.Screen name="AppTabs" component={AppTabs} />
+            <RootStack.Screen name="QsealCascade" component={QsealCascadeScreen} />
+          </RootStack.Navigator>
+        ) : (
+          <AuthNavigator />
+        )}
       </NavigationContainer>
     </SafeAreaProvider>
   );

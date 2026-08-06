@@ -8,7 +8,9 @@ import type {
   SessionSummary,
   ReceivingSlip,
 } from '../types';
+import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
+import * as qsealService from '../api/qsealService';
 
 interface InboundState {
   // Current session
@@ -22,9 +24,15 @@ interface InboundState {
   isLoading: boolean;
   error: string | null;
 
+  // QSeal linked units (accumulated across multiple parent scans)
+  linkedUnitsParents: QSealParentWithUnits[];
+  isFetchingLinkedUnits: boolean;
+
   // Actions
   startSession: (warehouseId: string, dockLocation: string) => Promise<void>;
   recordScan: (qrData: string) => Promise<void>;
+  fetchLinkedUnits: (parentId: string) => Promise<void>;
+  clearLinkedUnits: () => void;
   loadSummary: () => Promise<void>;
   endSession: () => Promise<ReceivingSlip>;
   clearSession: () => void;
@@ -40,6 +48,8 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   isScanning: false,
   isLoading: false,
   error: null,
+  linkedUnitsParents: [],
+  isFetchingLinkedUnits: false,
 
   // ---------- Start Session ----------
   startSession: async (warehouseId, dockLocation) => {
@@ -55,6 +65,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         sessionSummary: null,
         lastScan: null,
         generatedSlip: null,
+        linkedUnitsParents: [],
         isLoading: false,
       });
     } catch (error: any) {
@@ -85,6 +96,10 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
+      console.log('[InboundStore] recordScan API call:', {
+        sessionId: session.id,
+        payload: { qr_data: qrData?.substring(0, 100), device_type: 'mobile', os: 'iOS/Android' },
+      });
       const scan = await inboundService.recordScan(session.id, {
         qr_data: qrData,
         device_type: 'mobile',
@@ -115,6 +130,25 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       throw new Error(message);
     }
   },
+
+  // ---------- Fetch Linked Units (QSeal parent scanned during inbound) ----------
+  fetchLinkedUnits: async (parentId: string) => {
+    set({ isFetchingLinkedUnits: true, error: null });
+    try {
+      const data = await qsealService.getLinkedUnits(parentId);
+      set((state) => ({
+        linkedUnitsParents: [...state.linkedUnitsParents, data],
+        isFetchingLinkedUnits: false,
+      }));
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || error.message || 'Failed to fetch linked units.';
+      const msg = typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail));
+      console.error('fetchLinkedUnits failed:', msg);
+      set({ isFetchingLinkedUnits: false, error: msg });
+    }
+  },
+
+  clearLinkedUnits: () => set({ linkedUnitsParents: [] }),
 
   // ---------- Load Summary ----------
   loadSummary: async () => {
@@ -194,6 +228,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       sessionSummary: null,
       lastScan: null,
       generatedSlip: null,
+      linkedUnitsParents: [],
       isScanning: false,
     }),
 

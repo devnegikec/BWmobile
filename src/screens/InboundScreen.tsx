@@ -11,17 +11,113 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import QrScanner from '../components/QrScanner';
 import * as inboundService from '../api/inboundService';
+import * as qsealService from '../api/qsealService';
 import type { SessionSummary, ReceivingSlip } from '../types';
+import type { QSealParentWithUnits } from '../types';
 
 type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
+// ---- Expandable Linked Units Table ----
+function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const boxCount = parents.length;
+  const itemCount = parents.reduce((sum, p) => sum + p.linked_units.length, 0);
+
+  return (
+    <View style={styles.tableContainer}>
+      {/* Summary header */}
+      <View style={styles.tableHeader}>
+        <Text style={styles.tableHeaderText}>
+          📦 {boxCount} box{boxCount > 1 ? 'es' : ''} · 📋 {itemCount} item{itemCount > 1 ? 's' : ''}
+        </Text>
+      </View>
+
+      {/* Column headers */}
+      <View style={styles.tableColHeaders}>
+        <Text style={[styles.colHeader, styles.colProduct]}>Product</Text>
+        <Text style={[styles.colHeader, styles.colSku]}>SKU</Text>
+        <Text style={[styles.colHeader, styles.colBatch]}>Batch</Text>
+        <Text style={[styles.colHeader, styles.colBox]}>Box</Text>
+        <Text style={[styles.colHeader, styles.colQty]}>Qty</Text>
+      </View>
+
+      {/* Parent rows */}
+      {parents.map((parent, pIdx) => {
+        const isOpen = expanded.has(parent.id);
+        const firstUnit = parent.linked_units[0];
+        return (
+          <View key={parent.id}>
+            <TouchableOpacity
+              style={styles.parentRow}
+              onPress={() => toggleExpand(parent.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
+                {isOpen ? '▼ ' : '▶ '}{firstUnit?.product_name || parent.name}
+              </Text>
+              <Text style={[styles.cell, styles.colSku]} numberOfLines={1}>
+                {firstUnit?.product_sku || '-'}
+              </Text>
+              <Text style={[styles.cell, styles.colBatch]} numberOfLines={1}>
+                {firstUnit?.dispatch_batch || '-'}
+              </Text>
+              <Text style={[styles.cell, styles.colBox]}>
+                {pIdx + 1}/{boxCount}
+              </Text>
+              <Text style={[styles.cell, styles.colQty]}>
+                {parent.linked_units.length}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Expanded: unit details */}
+            {isOpen &&
+              parent.linked_units.map((unit) => (
+                <View key={unit.id} style={styles.unitRow}>
+                  <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
+                    {'    '}└ {unit.serial_number}
+                  </Text>
+                  <Text style={[styles.cell, styles.colSku]}>
+                    {unit.product_sku || '-'}
+                  </Text>
+                  <Text style={[styles.cell, styles.colBatch]}>
+                    {unit.dispatch_batch || '-'}
+                  </Text>
+                  <Text style={[styles.cell, styles.colBox]}> </Text>
+                  <Text style={[styles.cell, styles.colQty]}>1</Text>
+                </View>
+              ))}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function InboundScreen({ navigation }: any) {
-  const { selectedWarehouse } = useAuthStore();
+  const { selectedWarehouse, user, worker } = useAuthStore();
+  const orgId = user?.organization_id || worker?.organization_id || '';
+  console.log('[Inbound] orgId sources:', {
+    userOrgId: user?.organization_id,
+    workerOrgId: worker?.organization_id,
+    userKeys: user ? Object.keys(user) : 'null',
+    workerKeys: worker ? Object.keys(worker) : 'null',
+    final: orgId,
+  });
   const {
     currentSession,
     sessionSummary,
@@ -30,8 +126,10 @@ export default function InboundScreen({ navigation }: any) {
     isScanning,
     isLoading,
     error,
+    linkedUnitsParents,
     startSession,
     recordScan,
+    clearLinkedUnits,
     loadSummary,
     endSession,
     clearSession,
@@ -40,6 +138,7 @@ export default function InboundScreen({ navigation }: any) {
 
   const [step, setStep] = useState<Step>('idle');
   const [dockLocation, setDockLocation] = useState('');
+  const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
 
   // Sync step with store state
   useEffect(() => {
@@ -66,6 +165,7 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
     try {
+      clearLinkedUnits(); // Clear any linked units from previous session
       await startSession(selectedWarehouse.id, dockLocation.trim());
       setStep('scanning');
     } catch (err: any) {
@@ -73,12 +173,127 @@ export default function InboundScreen({ navigation }: any) {
     }
   };
 
-  const handleScan = async (data: string) => {
+  // ---- Extract serial from QSeal URL, or null if not a QSeal QR ----
+  // Supports both URL patterns:
+  //   Pattern A: /qseal/{SERIAL}        e.g. https://.../qseal/QSL5E248FC
+  //   Pattern B: /s/{SERIAL}/{...}      e.g. https://.../g/SKU/s/JV9HKW/12345
+  const extractQSealSerial = (qrData: string): string | null => {
+    const trimmed = qrData.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
     try {
-      await recordScan(data);
+      const url = new URL(trimmed);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+
+      // Pattern A: /qseal/{SERIAL}
+      const qsealIdx = pathParts.indexOf('qseal');
+      if (qsealIdx !== -1 && qsealIdx + 1 < pathParts.length) {
+        return pathParts[qsealIdx + 1];
+      }
+
+      // Pattern B: /s/{SERIAL}/...
+      const sIdx = pathParts.indexOf('s');
+      if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
+        return pathParts[sIdx + 1];
+      }
+    } catch {}
+    return null;
+  };
+
+  const handleScan = async (data: string) => {
+    console.log('[Inbound] handleScan raw data:', data.substring(0, 120));
+    const qsealSerial = extractQSealSerial(data);
+    console.log('[Inbound] isQSeal:', !!qsealSerial, 'serial:', qsealSerial);
+
+    if (qsealSerial) {
+      // ---- QSeal parent QR: resolve → fetch linked units → record each ----
+      await handleQSealScan(qsealSerial);
+    } else {
+      // ---- Regular item QR: record scan directly ----
+      console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
+      try {
+        await recordScan(data);
+        console.log('[Inbound] recordScan SUCCESS');
+      } catch (err: any) {
+        console.log('[Inbound] recordScan FAILED:', {
+          status: err?.response?.status,
+          data: JSON.stringify(err?.response?.data),
+        });
+        Alert.alert('Notice', err.message);
+      }
+    }
+  };
+
+  // ---- QSeal parent scan: Step 1→2→3 ----
+  const handleQSealScan = async (serial: string) => {
+    console.log('[Inbound] QSeal scan started, serial:', serial, 'orgId:', orgId);
+
+    if (!orgId) {
+      Alert.alert('Error', 'Organization ID not found. Please log out and log in again.');
+      return;
+    }
+
+    setIsProcessingQSeal(true);
+    try {
+      // Step 1: Resolve serial → get parent UUID
+      console.log('[Inbound] Step 1: POST /qseal/scan', { serial_number: serial, orgId });
+      const node = await qsealService.scanQSeal(orgId, {
+        serial_number: serial,
+        device_type: 'mobile',
+        os: 'iOS/Android',
+        ip_address: '',
+      });
+      console.log('[Inbound] Step 1 OK: node_id:', node.node_id, 'type:', node.qseal_type);
+
+      // Step 2: Fetch linked units (appends to the list)
+      console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
+      const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
+      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
+      // Add to store for display
+      useInboundStore.setState((s) => ({
+        linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
+      }));
+
+      // Step 3: Record each linked unit's product_item_url as a scan
+      if (parentWithUnits.linked_units.length > 0) {
+        let scannedCount = 0;
+        for (const unit of parentWithUnits.linked_units) {
+          const url = unit.product_item_url || unit.serial_number;
+          console.log('[Inbound] Step 3: recordScan linked unit:', {
+            serial: unit.serial_number,
+            url: url?.substring(0, 80),
+          });
+          try {
+            await recordScan(url);
+            scannedCount++;
+            console.log('[Inbound] Step 3 OK:', unit.serial_number);
+          } catch (err: any) {
+            console.log('[Inbound] Step 3 FAILED:', {
+              serial: unit.serial_number,
+              status: err?.response?.status,
+              data: JSON.stringify(err?.response?.data),
+            });
+          }
+        }
+        console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
+        const boxCount = useInboundStore.getState().linkedUnitsParents.length;
+        if (scannedCount > 0) {
+          Alert.alert(
+            'QSeal Processed',
+            `Box ${boxCount}: ${parentWithUnits.name}\n${scannedCount} item(s) recorded.`
+          );
+        }
+      }
     } catch (err: any) {
-      // Duplicate scan — just show a brief warning, don't block
-      Alert.alert('Notice', err.message);
+      console.log('[Inbound] QSeal scan FAILED:', {
+        status: err?.response?.status,
+        data: JSON.stringify(err?.response?.data),
+        message: err?.message,
+      });
+      const detail = err?.response?.data?.detail || err?.message || '';
+      const msg = typeof detail === 'string' ? detail : (detail?.message || 'Failed to process QSeal.');
+      Alert.alert('QSeal Error', msg);
+    } finally {
+      setIsProcessingQSeal(false);
     }
   };
 
@@ -113,6 +328,7 @@ export default function InboundScreen({ navigation }: any) {
 
   const handleNewSession = () => {
     clearSession();
+    clearLinkedUnits();
     setDockLocation('');
     setStep('idle');
   };
@@ -193,6 +409,17 @@ export default function InboundScreen({ navigation }: any) {
               ✅ {lastScan.sku} · Qty: {lastScan.raw_quantity} · {lastScan.batch_number || 'No batch'}
             </Text>
           </View>
+        )}
+
+        {/* QSeal Linked Units — expandable table */}
+        {isProcessingQSeal && (
+          <View style={styles.linkedUnitsLoading}>
+            <ActivityIndicator size="small" color="#1A73E8" />
+            <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
+          </View>
+        )}
+        {linkedUnitsParents.length > 0 && (
+          <LinkedUnitsTable parents={linkedUnitsParents} />
         )}
 
         {/* Action buttons */}
@@ -290,6 +517,14 @@ export default function InboundScreen({ navigation }: any) {
             </View>
           ))}
         </View>
+
+        {/* QSeal Linked Units */}
+        {linkedUnitsParents.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
+            <LinkedUnitsTable parents={linkedUnitsParents} />
+          </View>
+        )}
 
         {/* Info note */}
         <View style={styles.infoNote}>
@@ -628,4 +863,64 @@ const styles = StyleSheet.create({
     color: '#8899AA',
     fontSize: 16,
   },
+
+  // ---- Linked Units Table ----
+  tableContainer: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    overflow: 'hidden',
+    maxHeight: 220,
+  },
+  tableHeader: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  tableHeaderText: { color: '#4ADE80', fontSize: 12, fontWeight: '700' },
+  tableColHeaders: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#0F1923',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  colHeader: { color: '#667788', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  colProduct: { flex: 3, minWidth: 0 },
+  colSku: { flex: 2, minWidth: 0 },
+  colBatch: { flex: 2, minWidth: 0 },
+  colBox: { width: 40, textAlign: 'center' },
+  colQty: { width: 30, textAlign: 'center' },
+  parentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#0F1923',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A2332',
+  },
+  cell: { color: '#B0C4D8', fontSize: 12 },
+
+  linkedUnitsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    gap: 8,
+  },
+  linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
 });
