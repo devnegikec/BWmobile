@@ -4,6 +4,22 @@
 import { create } from 'zustand';
 import * as qsealService from '../api/qsealService';
 
+// ---- Safe error message extractor (prevents "[object Object]" crashes) ----
+function getErrorMessage(err: any): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (typeof detail === 'object' && detail !== null) {
+    return detail.message || detail.error || JSON.stringify(detail);
+  }
+  // Fallback: check if the whole data is an error object
+  const data = err?.response?.data;
+  if (typeof data === 'object' && data !== null && data.message) {
+    return typeof data.message === 'string' ? data.message : JSON.stringify(data.message);
+  }
+  if (typeof err?.message === 'string') return err.message;
+  return 'Something went wrong. Please try again.';
+}
+
 // ---- Local-only scanned item (no backend lookup) ----
 export interface ScannedQSeal {
   /** Serial number extracted from the QR code */
@@ -128,9 +144,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
       });
       return result;
     } catch (err: any) {
-      const detail =
-        err.response?.data?.detail || err.message || 'Failed to link QSeals. Please try again.';
-      set({ isSubmitting: false, error: detail });
+      set({ isSubmitting: false, error: getErrorMessage(err) });
       return null;
     }
   },
