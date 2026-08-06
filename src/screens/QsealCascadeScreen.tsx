@@ -138,9 +138,18 @@ export default function QsealCascadeScreen({ navigation }: any) {
     const result = await finalizeCascade();
     console.log('[QSealCascade] finalizeCascade result:', result);
     if (result) {
-      setPhase('success');
+      if (result.mapped_count === 0) {
+        // Backend accepted but nothing new was linked (already mapped)
+        Alert.alert(
+          'Already Mapped',
+          `All ${children.length} child QSeal(s) are already linked to this parent. No new links were created.`,
+          [{ text: 'OK' }]
+        );
+        setPhase('review');
+      } else {
+        setPhase('success');
+      }
     } else {
-      // Read error fresh from store — avoid stale closure value
       const storeError = useQSealStore.getState().error;
       console.log('[QSealCascade] finalize failed, error:', storeError);
       Alert.alert('Link Failed', storeError || 'Failed to link QSeals.');
@@ -353,6 +362,9 @@ export default function QsealCascadeScreen({ navigation }: any) {
 
   // ============ RENDER: Success ============
   if (phase === 'success') {
+    const count = lastMapResult?.mapped_count ?? 0;
+    const isAlreadyMapped = count === 0;
+
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -361,11 +373,14 @@ export default function QsealCascadeScreen({ navigation }: any) {
         </View>
 
         <View style={styles.idleContent}>
-          <Text style={styles.successIcon}>✅</Text>
-          <Text style={styles.successTitle}>Linked Successfully</Text>
+          <Text style={styles.successIcon}>{isAlreadyMapped ? 'ℹ️' : '✅'}</Text>
+          <Text style={styles.successTitle}>
+            {isAlreadyMapped ? 'Already Mapped' : 'Linked Successfully'}
+          </Text>
           <Text style={styles.successMessage}>
-            {lastMapResult?.mapped_count} child QSeal(s) linked to parent{' '}
-            {parent?.serialNumber || ''}.
+            {isAlreadyMapped
+              ? `All ${children.length} child QSeal(s) are already linked to parent ${parent?.serialNumber || ''}. No new links were created.`
+              : `${count} child QSeal(s) linked to parent ${parent?.serialNumber || ''}.`}
           </Text>
 
           <TouchableOpacity style={styles.idleScanBtn} onPress={handleNewSession}>
