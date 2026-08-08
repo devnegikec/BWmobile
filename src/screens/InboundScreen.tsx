@@ -479,7 +479,7 @@ export default function InboundScreen({ navigation }: any) {
                       <View style={styles.asnListItemInfo}>
                         <Text style={styles.asnListItemNo}>{item.asn_order_no}</Text>
                         <Text style={styles.asnListItemSrc}>
-                          From: {item.source_warehouse_name || 'N/A'}
+                          From: {item.from_warehouse?.name || 'N/A'}
                         </Text>
                       </View>
                       <View

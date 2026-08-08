@@ -316,13 +316,20 @@ export interface AsnOrder {
   id: string;
   organization_id: string;
   asn_order_no: string;
-  source_warehouse_id: string;
-  source_warehouse_name?: string;
-  destination_warehouse_id: string;
-  destination_warehouse_name?: string;
   status: 'draft' | 'confirmed' | 'partially_delivered' | 'delivered' | 'closed';
-  expected_delivery_date?: string;
-  notes?: string;
+  order_date?: string;
+  delivery_date?: string;
+  grand_total?: string;
+  from_warehouse?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  to_warehouse?: {
+    id: string;
+    name: string;
+    code: string;
+  };
   created_at: string;
   items?: AsnOrderItem[];
 }

@@ -272,16 +272,27 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     set({ isFetchingAsns: true });
     try {
       const response = await inboundService.getAsnOrders({
-        status: 'confirmed,partially_delivered',
         warehouse_id: warehouseId,
         page_size: 50,
       });
       // Response key might be 'asn_orders' or 'items'
-      const orders = (response as any).asn_orders || (response as any).items || [];
+      const allOrders = (response as any).asn_orders || (response as any).items || [];
+      // Only show confirmed or partially_delivered ASNs (filter out drafts)
+      const orders = allOrders.filter(
+        (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'
+      );
       set({ availableAsns: orders, isFetchingAsns: false });
     } catch (error: any) {
+      const status = error?.response?.status;
+      // 404: ASN endpoint not yet deployed (backend migration pending)
+      // Treat gracefully — show empty list, blind receipts still work
+      if (status === 404) {
+        console.log('[ASN] Endpoint not available (404). ASN feature requires backend migration. Continuing with blind receipt.');
+        set({ availableAsns: [], isFetchingAsns: false });
+        return;
+      }
       console.error('fetchAsnOrders failed:', error?.response?.data || error?.message);
-      set({ isFetchingAsns: false });
+      set({ availableAsns: [], isFetchingAsns: false });
     }
   },
 

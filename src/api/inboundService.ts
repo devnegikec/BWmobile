@@ -109,7 +109,7 @@ export async function getAsnOrders(params?: {
   page_size?: number;
 }): Promise<PaginatedResponse<AsnOrder>> {
   const { data } = await coreClient.get<PaginatedResponse<AsnOrder>>(
-    '/asn_orders',
+    '/asn-orders',
     { params }
   );
   return data;
@@ -118,7 +118,7 @@ export async function getAsnOrders(params?: {
 // ---------- ASN: Get Receiving Summary ----------
 export async function getAsnReceivingSummary(asnOrderId: string): Promise<AsnReceivingSummary> {
   const { data } = await coreClient.get<AsnReceivingSummary>(
-    `/asn_orders/${asnOrderId}/receiving-summary`
+    `/asn-orders/${asnOrderId}/receiving-summary`
   );
   return data;
 }
