@@ -12,13 +12,15 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import QrScanner from '../components/QrScanner';
 import * as inboundService from '../api/inboundService';
 import * as qsealService from '../api/qsealService';
-import type { SessionSummary, ReceivingSlip } from '../types';
+import type { SessionSummary, ReceivingSlip, AsnOrder, SummaryItem } from '../types';
 import type { QSealParentWithUnits } from '../types';
 
 type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
@@ -130,6 +132,10 @@ export default function InboundScreen({ navigation }: any) {
     isLoading,
     error,
     linkedUnitsParents,
+    availableAsns,
+    selectedAsn,
+    isFetchingAsns,
+    itemRejections,
     startSession,
     recordScan,
     clearLinkedUnits,
@@ -137,11 +143,17 @@ export default function InboundScreen({ navigation }: any) {
     endSession,
     clearSession,
     clearError,
+    fetchAsnOrders,
+    selectAsn,
+    toggleItemRejection,
+    rejectSlipItems,
   } = useInboundStore();
 
   const [step, setStep] = useState<Step>('idle');
   const [dockLocation, setDockLocation] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
+  const [showAsnPicker, setShowAsnPicker] = useState(false);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
 
   // Sync step with store state
   useEffect(() => {
@@ -168,8 +180,12 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
     try {
-      clearLinkedUnits(); // Clear any linked units from previous session
-      await startSession(selectedWarehouse.id, dockLocation.trim());
+      clearLinkedUnits();
+      await startSession(
+        selectedWarehouse.id,
+        dockLocation.trim(),
+        selectedAsn?.id
+      );
       setStep('scanning');
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -311,29 +327,36 @@ export default function InboundScreen({ navigation }: any) {
   };
 
   const handleEndSession = async () => {
-    Alert.alert(
-      'End Session',
-      'This will generate a receiving slip. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'End Session',
-          onPress: async () => {
-            try {
-              await endSession();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
+    const rejectionCount = Object.values(itemRejections).filter((r) => r.rejected).length;
+    const message =
+      rejectionCount > 0
+        ? `This will generate a receiving slip with ${rejectionCount} item(s) marked for rejection. Continue?`
+        : 'This will generate a receiving slip. Continue?';
+
+    Alert.alert('End Session', message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'End Session',
+        onPress: async () => {
+          try {
+            const slip = await endSession();
+            // After slip is created, reject marked items
+            if (Object.values(itemRejections).some((r) => r.rejected)) {
+              await rejectSlipItems(slip.id);
             }
-          },
+          } catch (err: any) {
+            Alert.alert('Error', err.message);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleNewSession = () => {
     clearSession();
     clearLinkedUnits();
     setDockLocation('');
+    setShowAsnPicker(false);
     setStep('idle');
   };
 
@@ -365,6 +388,40 @@ export default function InboundScreen({ navigation }: any) {
             />
           </View>
 
+          {/* ASN Selection (Optional) */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>ASN Reference (Optional)</Text>
+            {selectedAsn ? (
+              <View style={styles.asnSelectedRow}>
+                <View style={styles.asnSelectedInfo}>
+                  <Text style={styles.asnSelectedNo}>{selectedAsn.asn_order_no}</Text>
+                  <Text style={styles.asnSelectedStatus}>{selectedAsn.status}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.asnClearButton}
+                  onPress={() => selectAsn(null)}
+                >
+                  <Text style={styles.asnClearText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.asnPickerButton}
+                onPress={() => {
+                  if (selectedWarehouse) {
+                    fetchAsnOrders(selectedWarehouse.id);
+                  }
+                  setShowAsnPicker(true);
+                }}
+              >
+                <Text style={styles.asnPickerButtonText}>
+                  {isFetchingAsns ? 'Loading...' : 'Select ASN (tap to choose)'}
+                </Text>
+                <Text style={styles.asnPickerArrow}>▼</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           <TouchableOpacity
             style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
             onPress={handleStartSession}
@@ -377,6 +434,88 @@ export default function InboundScreen({ navigation }: any) {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* ASN Picker Modal */}
+        <Modal
+          visible={showAsnPicker}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowAsnPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select ASN</Text>
+                <TouchableOpacity onPress={() => setShowAsnPicker(false)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isFetchingAsns ? (
+                <ActivityIndicator color="#1A73E8" style={{ padding: 40 }} />
+              ) : availableAsns.length === 0 ? (
+                <View style={styles.emptyAsnState}>
+                  <Text style={styles.emptyAsnText}>No confirmed ASNs found</Text>
+                  <Text style={styles.emptyAsnSubtext}>
+                    You can still start a blind receipt without an ASN.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={availableAsns}
+                  keyExtractor={(item) => item.id}
+                  style={styles.asnList}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.asnListItem,
+                        selectedAsn?.id === item.id && styles.asnListItemSelected,
+                      ]}
+                      onPress={() => {
+                        selectAsn(item);
+                        setShowAsnPicker(false);
+                      }}
+                    >
+                      <View style={styles.asnListItemInfo}>
+                        <Text style={styles.asnListItemNo}>{item.asn_order_no}</Text>
+                        <Text style={styles.asnListItemSrc}>
+                          From: {item.source_warehouse_name || 'N/A'}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.asnStatusBadge,
+                          {
+                            backgroundColor:
+                              item.status === 'confirmed'
+                                ? '#3B82F6'
+                                : item.status === 'partially_delivered'
+                                ? '#F59E0B'
+                                : '#6B7280',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.asnStatusBadgeText}>
+                          {item.status.replace('_', ' ')}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+
+              <TouchableOpacity
+                style={[styles.secondaryButton, { marginTop: 12 }]}
+                onPress={() => {
+                  selectAsn(null);
+                  setShowAsnPicker(false);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Clear Selection (Blind Receipt)</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -390,6 +529,9 @@ export default function InboundScreen({ navigation }: any) {
           <View style={styles.sessionInfo}>
             <Text style={styles.sessionLabel}>Session Active</Text>
             <Text style={styles.sessionDock}>{currentSession.dock_location}</Text>
+            {currentSession.asn_order_no && (
+              <Text style={styles.sessionAsn}>📋 {currentSession.asn_order_no}</Text>
+            )}
           </View>
           <View style={styles.scanCount}>
             <Text style={styles.scanCountNum}>
@@ -448,6 +590,9 @@ export default function InboundScreen({ navigation }: any) {
 
   // ============ RENDER: SUMMARY ============
   if (step === 'summary' && sessionSummary && currentSession) {
+    const rejectedCount = Object.values(itemRejections).filter((r) => r.rejected).length;
+    const totalItems = sessionSummary.items.length;
+
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.summaryContent}>
         <View style={styles.header}>
@@ -455,24 +600,103 @@ export default function InboundScreen({ navigation }: any) {
           <Text style={styles.headerSubtitle}>
             {sessionSummary.total_boxes} boxes · {sessionSummary.total_quantity} qty
           </Text>
+          {currentSession.asn_order_no && (
+            <Text style={styles.summaryAsnRef}>📋 Linked to {currentSession.asn_order_no}</Text>
+          )}
         </View>
 
-        {sessionSummary.items.map((item, idx) => (
-          <View key={idx} style={styles.summaryCard}>
-            <Text style={styles.summarySku}>{item.sku}</Text>
-            <Text style={styles.summaryDetail}>
-              {item.total_boxes} boxes · {item.total_quantity} total qty
+        {/* Rejection summary bar */}
+        {rejectedCount > 0 && (
+          <View style={styles.rejectionSummaryBar}>
+            <Text style={styles.rejectionSummaryText}>
+              ⚠️ {rejectedCount} of {totalItems} item(s) marked for rejection
             </Text>
-            {item.batches.map((batch, bIdx) => (
-              <View key={bIdx} style={styles.batchRow}>
-                <Text style={styles.batchBadge}>{batch.batch_number}</Text>
-                <Text style={styles.batchDetail}>
-                  {batch.quantity} qty · {batch.box_count} boxes
-                </Text>
-              </View>
-            ))}
           </View>
-        ))}
+        )}
+
+        {sessionSummary.items.map((item, idx) => {
+          const itemKey = `${item.sku}||${item.batches[0]?.batch_number || ''}`;
+          const rejection = itemRejections[itemKey];
+          const isRejected = rejection?.rejected || false;
+
+          return (
+            <View
+              key={idx}
+              style={[
+                styles.summaryCard,
+                isRejected && styles.summaryCardRejected,
+              ]}
+            >
+              <View style={styles.summaryItemHeader}>
+                <View style={styles.summaryItemInfo}>
+                  <Text style={[styles.summarySku, isRejected && styles.summarySkuRejected]}>
+                    {item.sku}
+                  </Text>
+                  <Text style={styles.summaryDetail}>
+                    {item.total_boxes} boxes · {item.total_quantity} total qty
+                  </Text>
+                </View>
+                {/* Reject / Accept Toggle */}
+                <TouchableOpacity
+                  style={[
+                    styles.rejectToggle,
+                    isRejected ? styles.rejectToggleActive : styles.rejectToggleInactive,
+                  ]}
+                  onPress={() => {
+                    const batchNumber = item.batches[0]?.batch_number || '';
+                    if (!isRejected) {
+                      // Prompt for reason
+                      Alert.prompt
+                        ? Alert.prompt(
+                            'Reject Item',
+                            `Reason for rejecting ${item.sku}:`,
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Reject',
+                                onPress: (text?: string) =>
+                                  toggleItemRejection(item.sku, batchNumber, true, text || 'Rejected during review'),
+                              },
+                            ],
+                            'plain-text',
+                            'Damaged / Wrong item / Excess'
+                          )
+                        : toggleItemRejection(item.sku, batchNumber, true, 'Rejected during review');
+                  } else {
+                    toggleItemRejection(item.sku, batchNumber, false);
+                  }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.rejectToggleText,
+                      isRejected && styles.rejectToggleTextActive,
+                    ]}
+                  >
+                    {isRejected ? '✕ Rejected' : 'Reject'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Rejection reason display */}
+              {isRejected && rejection?.reason && (
+                <View style={styles.rejectionReasonRow}>
+                  <Text style={styles.rejectionReasonLabel}>Reason: </Text>
+                  <Text style={styles.rejectionReasonText}>{rejection.reason}</Text>
+                </View>
+              )}
+
+              {item.batches.map((batch, bIdx) => (
+                <View key={bIdx} style={styles.batchRow}>
+                  <Text style={styles.batchBadge}>{batch.batch_number}</Text>
+                  <Text style={styles.batchDetail}>
+                    {batch.quantity} qty · {batch.box_count} boxes
+                  </Text>
+                </View>
+              ))}
+            </View>
+          );
+        })}
 
         <View style={styles.summaryActions}>
           <TouchableOpacity
@@ -486,7 +710,9 @@ export default function InboundScreen({ navigation }: any) {
             style={styles.endButton}
             onPress={handleEndSession}
           >
-            <Text style={styles.endButtonText}>End & Generate Slip</Text>
+            <Text style={styles.endButtonText}>
+              End & Generate Slip{rejectedCount > 0 ? ` (${rejectedCount} rejected)` : ''}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -927,4 +1153,234 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
+
+  // ---- ASN Picker ----
+  asnPickerButton: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  asnPickerButtonText: {
+    color: '#8899AA',
+    fontSize: 15,
+  },
+  asnPickerArrow: {
+    color: '#667788',
+    fontSize: 12,
+  },
+  asnSelectedRow: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  asnSelectedInfo: {
+    flex: 1,
+  },
+  asnSelectedNo: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  asnSelectedStatus: {
+    color: '#3B82F6',
+    fontSize: 12,
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  asnClearButton: {
+    padding: 8,
+  },
+  asnClearText: {
+    color: '#EF4444',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+
+  // ---- ASN Modal ----
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#1A2332',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 30,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalClose: {
+    color: '#8899AA',
+    fontSize: 22,
+    padding: 4,
+  },
+  asnList: {
+    maxHeight: 400,
+  },
+  asnListItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  asnListItemSelected: {
+    backgroundColor: 'rgba(26,115,232,0.1)',
+  },
+  asnListItemInfo: {
+    flex: 1,
+  },
+  asnListItemNo: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  asnListItemSrc: {
+    color: '#8899AA',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  asnStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 12,
+  },
+  asnStatusBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  emptyAsnState: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyAsnText: {
+    color: '#8899AA',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  emptyAsnSubtext: {
+    color: '#667788',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+
+  // ---- Session ASN reference ----
+  sessionAsn: {
+    color: '#60A5FA',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+
+  // ---- Summary ASN reference ----
+  summaryAsnRef: {
+    color: '#60A5FA',
+    fontSize: 13,
+    marginTop: 6,
+  },
+
+  // ---- Rejection Summary Bar ----
+  rejectionSummaryBar: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    marginHorizontal: 24,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+  },
+  rejectionSummaryText: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // ---- Summary Item Header (with reject toggle) ----
+  summaryItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  summaryItemInfo: {
+    flex: 1,
+  },
+  summaryCardRejected: {
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    opacity: 0.85,
+  },
+  summarySkuRejected: {
+    color: '#EF4444',
+    textDecorationLine: 'line-through',
+  },
+  rejectToggle: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 12,
+  },
+  rejectToggleInactive: {
+    backgroundColor: '#2A3A4A',
+  },
+  rejectToggleActive: {
+    backgroundColor: '#EF4444',
+  },
+  rejectToggleText: {
+    color: '#B0C4D8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rejectToggleTextActive: {
+    color: '#fff',
+  },
+  rejectionReasonRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(239,68,68,0.2)',
+  },
+  rejectionReasonLabel: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rejectionReasonText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    flex: 1,
+  },
 });

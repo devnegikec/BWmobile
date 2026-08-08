@@ -158,6 +158,9 @@ export default function ReceivingSlipsScreen({ navigation }: any) {
               <Text style={styles.slipDate}>
                 Created: {new Date(item.created_at).toLocaleString()}
               </Text>
+              {item.asn_order_no && (
+                <Text style={styles.slipAsnRef}>📋 {item.asn_order_no}</Text>
+              )}
               <Text style={styles.slipItems}>
                 {item.items?.length || 0} item(s)
               </Text>
@@ -235,6 +238,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   slipDate: { color: '#8899AA', fontSize: 12, marginBottom: 4 },
+  slipAsnRef: { color: '#60A5FA', fontSize: 12, marginBottom: 4 },
   slipItems: { color: '#B0C4D8', fontSize: 13 },
 
   slipActions: { marginTop: 14 },
