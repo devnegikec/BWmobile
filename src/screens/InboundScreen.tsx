@@ -648,25 +648,6 @@ export default function InboundScreen({ navigation }: any) {
       });
     });
 
-    // 2. Scan summary items (per batch)
-    sessionSummary.items?.forEach((item) => {
-      item.batches.forEach((batch) => {
-        const batchKey = `${item.sku}||${batch.batch_number}`;
-        rows.push({
-          key: batchKey,
-          type: 'scan-batch',
-          productName: item.sku,
-          sku: item.sku,
-          batchNumber: batch.batch_number,
-          boxCount: batch.box_count,
-          itemCount: batch.quantity,
-          rejectKey: batchKey,
-          depth: 0,
-          isExpandable: false,
-        });
-      });
-    });
-
     // Compute reject states
     const getIsRejected = (row: TableRow) => itemRejections[row.rejectKey]?.rejected || false;
     const getRejectReason = (row: TableRow) => itemRejections[row.rejectKey]?.reason || '';
