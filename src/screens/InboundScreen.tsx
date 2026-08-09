@@ -788,7 +788,7 @@ export default function InboundScreen({ navigation }: any) {
                         style={[styles.utSerialNumber, isRejected && styles.utTextRejected]}
                         numberOfLines={1}
                       >
-                        {'  └ '}{row.productName}
+                        {'  '}{row.productName}
                       </Text>
                     </>
                   ) : (
@@ -1617,7 +1617,7 @@ const styles = StyleSheet.create({
 
   // ---- Unified Summary Table ----
   unifiedTable: {
-    marginHorizontal: 16,
+    marginHorizontal: 5,
     marginTop: 16,
     backgroundColor: '#1A2332',
     borderRadius: 10,
@@ -1639,10 +1639,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
   },
-  utColProduct: { flex: 3, minWidth: 0 },
-  utColBatch: { flex: 1.5, minWidth: 0 },
-  utColBoxes: { width: 65, textAlign: 'center' },
-  utColAction: { width: 80, alignItems: 'center' as const },
+  utColProduct: { flex: 5, minWidth: 0 },
+  utColBatch: { flex: 2, minWidth: 0 },
+  utColBoxes: { width: 55, alignItems: 'center' as const },
+  utColAction: { width: 62, alignItems: 'flex-end' as const },
   utRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1665,8 +1665,8 @@ const styles = StyleSheet.create({
   },
   utProductName: {
     color: '#E0E8F0',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
   },
   utSerialNumber: {
     color: '#8899AA',
@@ -1680,7 +1680,7 @@ const styles = StyleSheet.create({
   },
   utBatch: {
     color: '#8899AA',
-    fontSize: 12,
+    fontSize: 11,
   },
   utBoxItems: {
     color: '#B0C4D8',
@@ -1694,16 +1694,16 @@ const styles = StyleSheet.create({
   },
   utRejectBtn: {
     backgroundColor: '#2A3A4A',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   utRejectBtnActive: {
     backgroundColor: '#EF4444',
   },
   utRejectBtnText: {
     color: '#EF4444',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   utRejectBtnTextActive: {
@@ -1711,19 +1711,19 @@ const styles = StyleSheet.create({
   },
   utUndoBtn: {
     backgroundColor: 'rgba(245,158,11,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   utUndoBtnText: {
     color: '#F59E0B',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
 
   // ---- Reject List ----
   rejectListContainer: {
-    marginHorizontal: 16,
+    marginHorizontal: 5,
     marginTop: 24,
     backgroundColor: '#1A2332',
     borderRadius: 10,
