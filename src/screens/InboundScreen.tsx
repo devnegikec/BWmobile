@@ -154,6 +154,7 @@ export default function InboundScreen({ navigation }: any) {
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
   const [showAsnPicker, setShowAsnPicker] = useState(false);
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   // Sync step with store state
   useEffect(() => {
@@ -351,6 +352,7 @@ export default function InboundScreen({ navigation }: any) {
     clearLinkedUnits();
     setDockLocation('');
     setShowAsnPicker(false);
+    setExpandedParents(new Set());
     setStep('idle');
   };
 
@@ -590,8 +592,163 @@ export default function InboundScreen({ navigation }: any) {
 
   // ============ RENDER: SUMMARY ============
   if (step === 'summary' && sessionSummary && currentSession) {
-    const rejectedCount = Object.values(itemRejections).filter((r) => r.rejected).length;
-    const totalItems = sessionSummary.items?.length || 0;
+    // ---- Build unified table rows ----
+    interface TableRow {
+      key: string;
+      type: 'qseal-parent' | 'qseal-child' | 'scan-batch';
+      productName: string;
+      sku: string;
+      batchNumber: string;
+      boxCount: number;
+      itemCount: number;
+      rejectKey: string;
+      parentKey?: string;
+      depth: number;
+      isExpandable: boolean;
+    }
+
+    const rows: TableRow[] = [];
+
+    // 1. QSeal parents + children
+    linkedUnitsParents.forEach((parent) => {
+      const units = parent.linked_units || [];
+      const firstUnit = units[0];
+      const parentKey = `qseal-parent||${parent.id}`;
+      const parentRejected = itemRejections[parentKey]?.rejected || false;
+
+      rows.push({
+        key: parentKey,
+        type: 'qseal-parent',
+        productName: firstUnit?.product_name || parent.name,
+        sku: firstUnit?.product_sku || '-',
+        batchNumber: firstUnit?.dispatch_batch || '-',
+        boxCount: 1,
+        itemCount: units.length,
+        rejectKey: parentKey,
+        depth: 0,
+        isExpandable: units.length > 0,
+      });
+
+      units.forEach((unit) => {
+        const childKey = `qseal-child||${unit.id}`;
+        const childRejected = parentRejected || (itemRejections[childKey]?.rejected || false);
+        rows.push({
+          key: childKey,
+          type: 'qseal-child',
+          productName: unit.product_name || unit.serial_number,
+          sku: unit.product_sku || '-',
+          batchNumber: unit.dispatch_batch || '-',
+          boxCount: 1,
+          itemCount: 1,
+          rejectKey: childKey,
+          parentKey: parentKey,
+          depth: 1,
+          isExpandable: false,
+        });
+      });
+    });
+
+    // 2. Scan summary items (per batch)
+    sessionSummary.items?.forEach((item) => {
+      item.batches.forEach((batch) => {
+        const batchKey = `${item.sku}||${batch.batch_number}`;
+        rows.push({
+          key: batchKey,
+          type: 'scan-batch',
+          productName: item.sku,
+          sku: item.sku,
+          batchNumber: batch.batch_number,
+          boxCount: batch.box_count,
+          itemCount: batch.quantity,
+          rejectKey: batchKey,
+          depth: 0,
+          isExpandable: false,
+        });
+      });
+    });
+
+    // Compute reject states
+    const getIsRejected = (row: TableRow) => itemRejections[row.rejectKey]?.rejected || false;
+    const getRejectReason = (row: TableRow) => itemRejections[row.rejectKey]?.reason || '';
+
+    const rejectedRows = rows.filter((r) => getIsRejected(r));
+    const rejectedCount = rejectedRows.length;
+
+    // Helper: reject a parent + all its children
+    const rejectParent = (parentKey: string, reason: string) => {
+      // Find parent and children
+      const parent = rows.find((r) => r.key === parentKey);
+      if (!parent) return;
+      toggleItemRejection(parent.sku, parent.batchNumber, true, reason);
+      // Also set the parent key
+      useInboundStore.setState((s) => ({
+        itemRejections: {
+          ...s.itemRejections,
+          [parentKey]: { rejected: true, reason },
+        },
+      }));
+      // Cascade to children
+      rows
+        .filter((r) => r.parentKey === parentKey)
+        .forEach((child) => {
+          useInboundStore.setState((s) => ({
+            itemRejections: {
+              ...s.itemRejections,
+              [child.rejectKey]: { rejected: true, reason: `Parent rejected: ${reason}` },
+            },
+          }));
+        });
+    };
+
+    // Helper: reject a single row
+    const rejectRow = (row: TableRow, reason: string) => {
+      if (row.type === 'qseal-parent') {
+        rejectParent(row.rejectKey, reason);
+      } else {
+        toggleItemRejection(row.sku, row.batchNumber, true, reason);
+        useInboundStore.setState((s) => ({
+          itemRejections: {
+            ...s.itemRejections,
+            [row.rejectKey]: { rejected: true, reason },
+          },
+        }));
+      }
+    };
+
+    // Helper: unreject
+    const unrejectRow = (row: TableRow) => {
+      if (row.type === 'qseal-parent') {
+        useInboundStore.setState((s) => {
+          const next = { ...s.itemRejections };
+          delete next[row.rejectKey];
+          rows
+            .filter((r) => r.parentKey === row.rejectKey)
+            .forEach((child) => delete next[child.rejectKey]);
+          return { itemRejections: next };
+        });
+      } else {
+        toggleItemRejection(row.sku, row.batchNumber, false);
+        useInboundStore.setState((s) => {
+          const next = { ...s.itemRejections };
+          delete next[row.rejectKey];
+          return { itemRejections: next };
+        });
+      }
+    };
+
+    const toggleExpand = (key: string) => {
+      setExpandedParents((prev) => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+      });
+    };
+
+    // Visible rows: parents always visible; children only if parent expanded
+    const visibleRows = rows.filter((r) => {
+      if (r.depth === 0) return true;
+      return r.parentKey && expandedParents.has(r.parentKey);
+    });
 
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.summaryContent}>
@@ -609,91 +766,153 @@ export default function InboundScreen({ navigation }: any) {
         {rejectedCount > 0 && (
           <View style={styles.rejectionSummaryBar}>
             <Text style={styles.rejectionSummaryText}>
-              ⚠️ {rejectedCount} of {totalItems} item(s) marked for rejection
+              ⚠️ {rejectedCount} item(s) marked for rejection
             </Text>
           </View>
         )}
 
-        {sessionSummary.items.map((item, idx) => {
-          const itemKey = `${item.sku}||${item.batches[0]?.batch_number || ''}`;
-          const rejection = itemRejections[itemKey];
-          const isRejected = rejection?.rejected || false;
+        {/* ---- MAIN TABLE ---- */}
+        <View style={styles.unifiedTable}>
+          {/* Column headers */}
+          <View style={styles.utColHeaders}>
+            <Text style={[styles.utColHeader, styles.utColProduct]}>Product / SKU</Text>
+            <Text style={[styles.utColHeader, styles.utColBatch]}>Batch</Text>
+            <Text style={[styles.utColHeader, styles.utColBoxes]}>Boxes / Items</Text>
+            <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>
+          </View>
 
-          return (
-            <View
-              key={idx}
-              style={[
-                styles.summaryCard,
-                isRejected && styles.summaryCardRejected,
-              ]}
-            >
-              <View style={styles.summaryItemHeader}>
-                <View style={styles.summaryItemInfo}>
-                  <Text style={[styles.summarySku, isRejected && styles.summarySkuRejected]}>
-                    {item.sku}
+          {visibleRows.map((row) => {
+            const isRejected = getIsRejected(row);
+            const isChild = row.depth > 0;
+
+            return (
+              <TouchableOpacity
+                key={row.key}
+                style={[
+                  styles.utRow,
+                  isChild && styles.utRowChild,
+                  isRejected && styles.utRowRejected,
+                ]}
+                onPress={() => {
+                  if (row.isExpandable) toggleExpand(row.key);
+                }}
+                activeOpacity={row.isExpandable ? 0.7 : 1}
+                disabled={!row.isExpandable}
+              >
+                {/* Product / SKU */}
+                <View style={[styles.utCell, styles.utColProduct]}>
+                  <Text
+                    style={[styles.utProductName, isRejected && styles.utTextRejected]}
+                    numberOfLines={1}
+                  >
+                    {row.isExpandable
+                      ? (expandedParents.has(row.key) ? '▼ ' : '▶ ') + row.productName
+                      : (isChild ? '   ' : '') + row.productName}
                   </Text>
-                  <Text style={styles.summaryDetail}>
-                    {item.total_boxes} boxes · {item.total_quantity} total qty
+                  <Text style={[styles.utSku, isRejected && styles.utTextRejected]}>
+                    {row.sku}
                   </Text>
                 </View>
-                {/* Reject / Accept Toggle (thumbs icon) */}
-                <TouchableOpacity
-                  style={styles.rejectIconButton}
-                  onPress={() => {
-                    const batchNumber = item.batches[0]?.batch_number || '';
-                    if (!isRejected) {
-                      Alert.prompt
-                        ? Alert.prompt(
-                            'Reject Item',
-                            `Reason for rejecting ${item.sku}:`,
-                            [
-                              { text: 'Cancel', style: 'cancel' },
-                              {
-                                text: 'Reject',
-                                onPress: (text?: string) =>
-                                  toggleItemRejection(item.sku, batchNumber, true, text || 'Rejected during review'),
-                              },
-                            ],
-                            'plain-text',
-                            'Damaged / Wrong item / Excess'
-                          )
-                        : toggleItemRejection(item.sku, batchNumber, true, 'Rejected during review');
-                  } else {
-                    toggleItemRejection(item.sku, batchNumber, false);
-                  }
-                  }}
-                >
-                  <Text style={[styles.rejectIcon, isRejected && styles.rejectIconActive]}>
-                    {isRejected ? '👎' : '👍'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
 
-              {/* Rejection reason display */}
-              {isRejected && rejection?.reason && (
-                <View style={styles.rejectionReasonRow}>
-                  <Text style={styles.rejectionReasonLabel}>Reason: </Text>
-                  <Text style={styles.rejectionReasonText}>{rejection.reason}</Text>
-                </View>
-              )}
-
-              {item.batches.map((batch, bIdx) => (
-                <View key={bIdx} style={styles.batchRow}>
-                  <Text style={styles.batchBadge}>{batch.batch_number}</Text>
-                  <Text style={styles.batchDetail}>
-                    {batch.quantity} qty · {batch.box_count} boxes
+                {/* Batch */}
+                <View style={[styles.utCell, styles.utColBatch]}>
+                  <Text style={[styles.utBatch, isRejected && styles.utTextRejected]}>
+                    {row.batchNumber}
                   </Text>
                 </View>
-              ))}
+
+                {/* Boxes / Items */}
+                <View style={[styles.utCell, styles.utColBoxes]}>
+                  <Text style={[styles.utBoxItems, isRejected && styles.utTextRejected]}>
+                    {row.boxCount}/{row.itemCount}
+                  </Text>
+                </View>
+
+                {/* Action: Reject */}
+                <View style={[styles.utCell, styles.utColAction]}>
+                  <TouchableOpacity
+                    style={[styles.utRejectBtn, isRejected && styles.utRejectBtnActive]}
+                    onPress={() => {
+                      if (isRejected) {
+                        unrejectRow(row);
+                      } else {
+                        const label = row.type === 'qseal-parent'
+                          ? `${row.productName} (+${row.itemCount} items)`
+                          : row.productName;
+                        Alert.alert(
+                          'Confirm Rejection',
+                          `Reject "${label}"?\nThis will move it to the reject list.`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Reject',
+                              style: 'destructive',
+                              onPress: () => rejectRow(row, 'Rejected during review'),
+                            },
+                          ]
+                        );
+                      }
+                    }}
+                  >
+                    <Text style={[styles.utRejectBtnText, isRejected && styles.utRejectBtnTextActive]}>
+                      {isRejected ? 'Rejected' : 'Reject'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ---- REJECT LIST ---- */}
+        {rejectedRows.length > 0 && (
+          <View style={styles.rejectListContainer}>
+            <View style={styles.rejectListHeader}>
+              <Text style={styles.rejectListTitle}>
+                🚫 Rejected Items ({rejectedRows.length})
+              </Text>
             </View>
-          );
-        })}
 
-        {/* QSeal Linked Units Table */}
-        {linkedUnitsParents?.length > 0 && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
-            <LinkedUnitsTable parents={linkedUnitsParents} />
+            {/* Column headers (same format) */}
+            <View style={styles.utColHeaders}>
+              <Text style={[styles.utColHeader, styles.utColProduct]}>Product / SKU</Text>
+              <Text style={[styles.utColHeader, styles.utColBatch]}>Batch</Text>
+              <Text style={[styles.utColHeader, styles.utColBoxes]}>Boxes / Items</Text>
+              <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>
+            </View>
+
+            {rejectedRows.map((row) => {
+              const reason = getRejectReason(row);
+              const isChild = row.depth > 0;
+
+              return (
+                <View key={`rej-${row.key}`} style={[styles.utRow, styles.utRowRejected, isChild && styles.utRowChild]}>
+                  <View style={[styles.utCell, styles.utColProduct]}>
+                    <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={1}>
+                      {isChild ? '  └ ' : ''}{row.productName}
+                    </Text>
+                    <Text style={[styles.utSku, styles.utTextRejected]}>{row.sku}</Text>
+                    {reason ? (
+                      <Text style={styles.rejectListReason} numberOfLines={1}>{reason}</Text>
+                    ) : null}
+                  </View>
+                  <View style={[styles.utCell, styles.utColBatch]}>
+                    <Text style={[styles.utBatch, styles.utTextRejected]}>{row.batchNumber}</Text>
+                  </View>
+                  <View style={[styles.utCell, styles.utColBoxes]}>
+                    <Text style={[styles.utBoxItems, styles.utTextRejected]}>{row.boxCount}/{row.itemCount}</Text>
+                  </View>
+                  <View style={[styles.utCell, styles.utColAction]}>
+                    <TouchableOpacity
+                      style={styles.utUndoBtn}
+                      onPress={() => unrejectRow(row)}
+                    >
+                      <Text style={styles.utUndoBtnText}>Undo</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -1391,5 +1610,133 @@ const styles = StyleSheet.create({
     color: '#FCA5A5',
     fontSize: 12,
     flex: 1,
+  },
+
+  // ---- Unified Summary Table ----
+  unifiedTable: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    overflow: 'hidden',
+  },
+  utColHeaders: {
+    flexDirection: 'row',
+    backgroundColor: '#0F1923',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  utColHeader: {
+    color: '#667788',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  utColProduct: { flex: 3, minWidth: 0 },
+  utColBatch: { flex: 1.5, minWidth: 0 },
+  utColBoxes: { width: 65, textAlign: 'center' },
+  utColAction: { width: 80, alignItems: 'center' as const },
+  utRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  utRowChild: {
+    backgroundColor: '#0F1923',
+    paddingLeft: 6,
+  },
+  utRowRejected: {
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#EF4444',
+  },
+  utCell: {
+    justifyContent: 'center',
+  },
+  utProductName: {
+    color: '#E0E8F0',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  utSku: {
+    color: '#667788',
+    fontSize: 10,
+    marginTop: 1,
+  },
+  utBatch: {
+    color: '#8899AA',
+    fontSize: 12,
+  },
+  utBoxItems: {
+    color: '#B0C4D8',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  utTextRejected: {
+    color: '#FCA5A5',
+    textDecorationLine: 'line-through' as const,
+  },
+  utRejectBtn: {
+    backgroundColor: '#2A3A4A',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  utRejectBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  utRejectBtnText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  utRejectBtnTextActive: {
+    color: '#fff',
+  },
+  utUndoBtn: {
+    backgroundColor: 'rgba(245,158,11,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  utUndoBtnText: {
+    color: '#F59E0B',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  // ---- Reject List ----
+  rejectListContainer: {
+    marginHorizontal: 16,
+    marginTop: 24,
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    overflow: 'hidden',
+  },
+  rejectListHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EF4444',
+  },
+  rejectListTitle: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  rejectListReason: {
+    color: '#FCA5A5',
+    fontSize: 9,
+    marginTop: 2,
   },
 });
