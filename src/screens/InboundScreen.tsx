@@ -266,7 +266,7 @@ export default function InboundScreen({ navigation }: any) {
       // Step 2: Fetch linked units (appends to the list)
       console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
-      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
+      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units?.length || 0);
       // Add to store for display
       useInboundStore.setState((s) => ({
         linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
@@ -294,14 +294,8 @@ export default function InboundScreen({ navigation }: any) {
             });
           }
         }
-        console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
-        const boxCount = useInboundStore.getState().linkedUnitsParents?.length || 0;
-        if (scannedCount > 0) {
-          Alert.alert(
-            'QSeal Processed',
-            `Box ${boxCount}: ${parentWithUnits.name}\n${scannedCount} item(s) recorded.`
-          );
-        }
+        console.log('[Inbound] Step 3 done:', scannedCount, '/', units.length, 'recorded');
+        // QSeal info shown in the compact count bar — no popup needed
       }
     } catch (err: any) {
       console.log('[Inbound] QSeal scan FAILED:', {
@@ -557,7 +551,7 @@ export default function InboundScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* QSeal Linked Units — expandable table */}
+        {/* QSeal count bar (compact) */}
         {isProcessingQSeal && (
           <View style={styles.linkedUnitsLoading}>
             <ActivityIndicator size="small" color="#1A73E8" />
@@ -565,7 +559,13 @@ export default function InboundScreen({ navigation }: any) {
           </View>
         )}
         {linkedUnitsParents?.length > 0 && (
-          <LinkedUnitsTable parents={linkedUnitsParents} />
+          <View style={styles.qsealCountBar}>
+            <Text style={styles.qsealCountText}>
+              📦 {linkedUnitsParents.length} box{linkedUnitsParents.length > 1 ? 'es' : ''}
+              {' · '}
+              📋 {linkedUnitsParents.reduce((sum, p) => sum + (p.linked_units?.length || 0), 0)} item(s)
+            </Text>
+          </View>
         )}
 
         {/* Action buttons */}
@@ -591,7 +591,7 @@ export default function InboundScreen({ navigation }: any) {
   // ============ RENDER: SUMMARY ============
   if (step === 'summary' && sessionSummary && currentSession) {
     const rejectedCount = Object.values(itemRejections).filter((r) => r.rejected).length;
-    const totalItems = sessionSummary.items.length;
+    const totalItems = sessionSummary.items?.length || 0;
 
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.summaryContent}>
@@ -636,16 +636,12 @@ export default function InboundScreen({ navigation }: any) {
                     {item.total_boxes} boxes · {item.total_quantity} total qty
                   </Text>
                 </View>
-                {/* Reject / Accept Toggle */}
+                {/* Reject / Accept Toggle (thumbs icon) */}
                 <TouchableOpacity
-                  style={[
-                    styles.rejectToggle,
-                    isRejected ? styles.rejectToggleActive : styles.rejectToggleInactive,
-                  ]}
+                  style={styles.rejectIconButton}
                   onPress={() => {
                     const batchNumber = item.batches[0]?.batch_number || '';
                     if (!isRejected) {
-                      // Prompt for reason
                       Alert.prompt
                         ? Alert.prompt(
                             'Reject Item',
@@ -667,13 +663,8 @@ export default function InboundScreen({ navigation }: any) {
                   }
                   }}
                 >
-                  <Text
-                    style={[
-                      styles.rejectToggleText,
-                      isRejected && styles.rejectToggleTextActive,
-                    ]}
-                  >
-                    {isRejected ? '✕ Rejected' : 'Reject'}
+                  <Text style={[styles.rejectIcon, isRejected && styles.rejectIconActive]}>
+                    {isRejected ? '👎' : '👍'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -697,6 +688,14 @@ export default function InboundScreen({ navigation }: any) {
             </View>
           );
         })}
+
+        {/* QSeal Linked Units Table */}
+        {linkedUnitsParents?.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
+            <LinkedUnitsTable parents={linkedUnitsParents} />
+          </View>
+        )}
 
         <View style={styles.summaryActions}>
           <TouchableOpacity
@@ -734,8 +733,8 @@ export default function InboundScreen({ navigation }: any) {
 
         {/* Slip Items */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>Items ({generatedSlip.items.length})</Text>
-          {generatedSlip.items.map((item) => (
+          <Text style={styles.sectionCardTitle}>Items ({generatedSlip.items?.length || 0})</Text>
+          {generatedSlip.items?.map((item) => (
             <View key={item.id} style={styles.itemRow}>
               <View style={styles.itemInfo}>
                 <Text style={styles.itemSku}>{item.sku}</Text>
@@ -1154,6 +1153,24 @@ const styles = StyleSheet.create({
   },
   linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
 
+  // ---- QSeal Compact Count Bar ----
+  qsealCountBar: {
+    backgroundColor: '#1A2332',
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  qsealCountText: {
+    color: '#4ADE80',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
   // ---- ASN Picker ----
   asnPickerButton: {
     backgroundColor: '#1A2332',
@@ -1346,25 +1363,17 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     textDecorationLine: 'line-through',
   },
-  rejectToggle: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
+  rejectIconButton: {
+    padding: 8,
     marginLeft: 12,
   },
-  rejectToggleInactive: {
-    backgroundColor: '#2A3A4A',
+  rejectIcon: {
+    fontSize: 22,
+    opacity: 0.5,
   },
-  rejectToggleActive: {
-    backgroundColor: '#EF4444',
-  },
-  rejectToggleText: {
-    color: '#B0C4D8',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  rejectToggleTextActive: {
-    color: '#fff',
+  rejectIconActive: {
+    fontSize: 22,
+    opacity: 1,
   },
   rejectionReasonRow: {
     flexDirection: 'row',

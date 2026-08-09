@@ -203,12 +203,22 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     set({ isLoading: true });
     try {
       const slip = await inboundService.endSession(session.id);
+      // The end-session response may not include items — fetch the full slip
+      let fullSlip = slip;
+      if (!slip.items || slip.items.length === 0) {
+        try {
+          fullSlip = await inboundService.getReceivingSlip(slip.id);
+        } catch {
+          // Use the original slip if detail fetch fails
+          fullSlip = slip;
+        }
+      }
       set({
-        generatedSlip: slip,
+        generatedSlip: fullSlip,
         isScanning: false,
         isLoading: false,
       });
-      return slip;
+      return fullSlip;
     } catch (error: any) {
       const status = error.response?.status;
       const detail = error.response?.data?.detail || '';
