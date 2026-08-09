@@ -114,15 +114,15 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
 }
 
 export default function InboundScreen({ navigation }: any) {
-  const { selectedWarehouse, user, worker } = useAuthStore();
+  const { selectedWarehouse, user, worker, isAuthenticated, logout } = useAuthStore();
   const orgId = user?.organization_id || worker?.organization_id || '';
-  console.log('[Inbound] orgId sources:', {
-    userOrgId: user?.organization_id,
-    workerOrgId: worker?.organization_id,
-    userKeys: user ? Object.keys(user) : 'null',
-    workerKeys: worker ? Object.keys(worker) : 'null',
-    final: orgId,
-  });
+
+  // Redirect to login if no valid user/worker session
+  useEffect(() => {
+    if (!isAuthenticated || (!user && !worker)) {
+      logout();
+    }
+  }, [isAuthenticated, user, worker]);
   const {
     currentSession,
     sessionSummary,
@@ -765,6 +765,7 @@ export default function InboundScreen({ navigation }: any) {
           {visibleRows.map((row) => {
             const isRejected = getIsRejected(row);
             const isChild = row.depth > 0;
+            const isExpanded = row.isExpandable && expandedParents.has(row.key);
 
             return (
               <TouchableOpacity
@@ -780,36 +781,47 @@ export default function InboundScreen({ navigation }: any) {
                 activeOpacity={row.isExpandable ? 0.7 : 1}
                 disabled={!row.isExpandable}
               >
-                {/* Product / SKU */}
+                {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
                 <View style={[styles.utCell, styles.utColProduct]}>
-                  <Text
-                    style={[styles.utProductName, isRejected && styles.utTextRejected]}
-                    numberOfLines={1}
-                  >
-                    {row.isExpandable
-                      ? (expandedParents.has(row.key) ? '▼ ' : '▶ ') + row.productName
-                      : (isChild ? '   ' : '') + row.productName}
-                  </Text>
-                  <Text style={[styles.utSku, isRejected && styles.utTextRejected]}>
-                    {row.sku}
-                  </Text>
+                  {isChild ? (
+                    <>
+                      <Text
+                        style={[styles.utSerialNumber, isRejected && styles.utTextRejected]}
+                        numberOfLines={1}
+                      >
+                        {'  └ '}{row.productName}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text
+                        style={[styles.utProductName, isRejected && styles.utTextRejected]}
+                        numberOfLines={1}
+                      >
+                        {row.isExpandable ? (isExpanded ? '▼ ' : '▶ ') : ''}{row.productName}
+                      </Text>
+                      <Text style={[styles.utSku, isRejected && styles.utTextRejected]}>
+                        {row.sku}
+                      </Text>
+                    </>
+                  )}
                 </View>
 
-                {/* Batch */}
+                {/* Col 2: Batch */}
                 <View style={[styles.utCell, styles.utColBatch]}>
                   <Text style={[styles.utBatch, isRejected && styles.utTextRejected]}>
                     {row.batchNumber}
                   </Text>
                 </View>
 
-                {/* Boxes / Items */}
+                {/* Col 3: Boxes/Items (parent) or Qty (child) */}
                 <View style={[styles.utCell, styles.utColBoxes]}>
                   <Text style={[styles.utBoxItems, isRejected && styles.utTextRejected]}>
-                    {row.boxCount}/{row.itemCount}
+                    {isChild ? row.itemCount : `${row.boxCount}/${row.itemCount}`}
                   </Text>
                 </View>
 
-                {/* Action: Reject */}
+                {/* Col 4: Action */}
                 <View style={[styles.utCell, styles.utColAction]}>
                   <TouchableOpacity
                     style={[styles.utRejectBtn, isRejected && styles.utRejectBtnActive]}
@@ -868,11 +880,20 @@ export default function InboundScreen({ navigation }: any) {
 
               return (
                 <View key={`rej-${row.key}`} style={[styles.utRow, styles.utRowRejected, isChild && styles.utRowChild]}>
+                  {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
                   <View style={[styles.utCell, styles.utColProduct]}>
-                    <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={1}>
-                      {isChild ? '  └ ' : ''}{row.productName}
-                    </Text>
-                    <Text style={[styles.utSku, styles.utTextRejected]}>{row.sku}</Text>
+                    {isChild ? (
+                      <Text style={[styles.utSerialNumber, styles.utTextRejected]} numberOfLines={1}>
+                        {'  └ '}{row.productName}
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={1}>
+                          {row.productName}
+                        </Text>
+                        <Text style={[styles.utSku, styles.utTextRejected]}>{row.sku}</Text>
+                      </>
+                    )}
                     {reason ? (
                       <Text style={styles.rejectListReason} numberOfLines={1}>{reason}</Text>
                     ) : null}
@@ -881,7 +902,9 @@ export default function InboundScreen({ navigation }: any) {
                     <Text style={[styles.utBatch, styles.utTextRejected]}>{row.batchNumber}</Text>
                   </View>
                   <View style={[styles.utCell, styles.utColBoxes]}>
-                    <Text style={[styles.utBoxItems, styles.utTextRejected]}>{row.boxCount}/{row.itemCount}</Text>
+                    <Text style={[styles.utBoxItems, styles.utTextRejected]}>
+                      {isChild ? row.itemCount : `${row.boxCount}/${row.itemCount}`}
+                    </Text>
                   </View>
                   <View style={[styles.utCell, styles.utColAction]}>
                     <TouchableOpacity
@@ -1645,6 +1668,11 @@ const styles = StyleSheet.create({
     color: '#E0E8F0',
     fontSize: 13,
     fontWeight: '600',
+  },
+  utSerialNumber: {
+    color: '#8899AA',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   utSku: {
     color: '#667788',
