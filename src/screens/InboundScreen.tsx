@@ -631,11 +631,10 @@ export default function InboundScreen({ navigation }: any) {
 
       units.forEach((unit) => {
         const childKey = `qseal-child||${unit.id}`;
-        const childRejected = parentRejected || (itemRejections[childKey]?.rejected || false);
         rows.push({
           key: childKey,
           type: 'qseal-child',
-          productName: unit.product_name || unit.serial_number,
+          productName: unit.serial_number,
           sku: unit.product_sku || '-',
           batchNumber: unit.dispatch_batch || '-',
           boxCount: 1,
