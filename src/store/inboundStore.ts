@@ -86,10 +86,29 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       if (asnOrderId) {
         payload.asn_order_id = asnOrderId;
       }
+      console.log('[Store] startSession — payload:', payload);
       const session = await inboundService.startInboundSession(payload);
+      console.log('[Store] startSession — raw response keys:', Object.keys(session));
+      console.log('[Store] startSession — response ASN:', {
+        sessionId: session.id,
+        asn_order_id: (session as any).asn_order_id || 'NOT IN RESPONSE',
+        asn_order_no: (session as any).asn_order_no || 'NOT IN RESPONSE',
+      });
+
+      // Backend may not return asn_order_id/no in the response — attach from the selected ASN
       const selectedAsn = get().selectedAsn;
+      const sessionWithAsn = { ...session };
+      if (!sessionWithAsn.asn_order_id && asnOrderId) {
+        sessionWithAsn.asn_order_id = asnOrderId;
+        sessionWithAsn.asn_order_no = selectedAsn?.asn_order_no || undefined;
+        console.log('[Store] startSession — attached ASN from payload:', {
+          asn_order_id: asnOrderId,
+          asn_order_no: selectedAsn?.asn_order_no,
+        });
+      }
+
       set({
-        currentSession: session,
+        currentSession: sessionWithAsn,
         isScanning: true,
         sessionSummary: null,
         lastScan: null,
@@ -200,6 +219,13 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   endSession: async () => {
     const session = get().currentSession;
     if (!session) throw new Error('No active session.');
+    console.log('[Store] endSession — current session ASN details:', {
+      sessionId: session.id,
+      asn_order_id: session.asn_order_id || 'NOT SET',
+      asn_order_no: session.asn_order_no || 'NOT SET',
+      dock: session.dock_location,
+      boxes: session.total_boxes_scanned,
+    });
     set({ isLoading: true });
     try {
       const slip = await inboundService.endSession(session.id);
@@ -212,6 +238,14 @@ export const useInboundStore = create<InboundState>((set, get) => ({
           // Use the original slip if detail fetch fails
           fullSlip = slip;
         }
+      }
+      // Attach ASN reference from session if slip doesn't have it
+      if (!fullSlip.asn_order_id && session.asn_order_id) {
+        fullSlip = {
+          ...fullSlip,
+          asn_order_id: session.asn_order_id,
+          asn_order_no: session.asn_order_no || undefined,
+        };
       }
       set({
         generatedSlip: fullSlip,

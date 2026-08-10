@@ -951,6 +951,9 @@ export default function InboundScreen({ navigation }: any) {
           <View style={styles.statusBadge}>
             <Text style={styles.statusText}>{generatedSlip.status}</Text>
           </View>
+          {generatedSlip.asn_order_no && (
+            <Text style={styles.slipAsnRef}>📋 {generatedSlip.asn_order_no}</Text>
+          )}
         </View>
 
         {/* Slip Items */}
@@ -1240,6 +1243,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  slipAsnRef: {
+    color: '#60A5FA',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 10,
   },
   sectionCard: {
     backgroundColor: '#1A2332',
