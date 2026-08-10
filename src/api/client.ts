@@ -173,7 +173,9 @@ async function handle401(error: AxiosError) {
   try {
     const storedRefreshToken = await getRefreshToken();
     if (!storedRefreshToken) {
-      throw new Error('No refresh token');
+      // No refresh token (barcode/QR worker login) — clear and reject silently
+      await clearTokens();
+      return Promise.reject(error);
     }
 
     const { data } = await identityClient.post('/identity/refresh', {
