@@ -169,6 +169,8 @@ export interface ReceivingSlipItem {
   notes: string | null;
   rejection_reason?: string | null;
   rejected_at?: string | null;
+  put_away_status?: 'pending' | 'completed';
+  put_away_at?: string | null;
 }
 
 // ---------- Put-Away ----------
@@ -177,13 +179,18 @@ export interface PutAwayList {
   organization_id: string;
   warehouse_id: string;
   put_away_list_no: string;
-  status: 'pending' | 'completed';
-  reference_type: string;
-  reference_id: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  reference_type?: string;
+  reference_id?: string;
   receiving_slip_id: string;
-  assigned_to: string;
+  assigned_to?: string | null;
+  total_items: number;
+  completed_items: number;
+  pending_items: number;
+  remarks?: string | null;
   warnings: string[];
   created_at: string;
+  updated_at?: string;
   items: PutAwayItem[];
 }
 
@@ -191,13 +198,48 @@ export interface PutAwayItem {
   id: string;
   item_id: string;
   sku: string;
+  item_name?: string;
   batch_number: string;
   quantity: number;
   bin_location_id: string;
   bin_location_code: string;
+  bin_full_path?: string;
   sort_order: number;
   status: 'pending' | 'completed' | 'skipped';
-  completed_at?: string;
+  notes?: string | null;
+  completed_at?: string | null;
+}
+
+// ---------- FIFO Bin Suggestions (Workflow B) ----------
+export interface FifoBinSuggestion {
+  bin_id: string;
+  bin_path: string;
+  batch_number: string;
+  quantity_on_hand: number;
+  stock_age_days: number;
+}
+
+export interface FifoBinResponse {
+  sku: string;
+  bins: FifoBinSuggestion[];
+  message: string | null;
+}
+
+// ---------- Assign Bin (Workflow B) ----------
+export interface AssignBinRequest {
+  bin_location_id: string;
+  quantity?: number;
+}
+
+export interface AssignBinResponse {
+  slip_item_id: string;
+  sku: string;
+  batch_number: string;
+  quantity: number;
+  bin_location_id: string;
+  bin_full_path: string;
+  put_away_status: string;
+  put_away_at: string;
 }
 
 // ---------- Pagination ----------
@@ -228,6 +270,17 @@ export interface BinQRPayload {
   full_path: string;
   location_type: string;
   location_code: string;
+}
+
+// ---------- ASN Order ----------
+export interface AsnOrder {
+  id: string;
+  asn_order_no: string;
+  supplier_name: string;
+  status: string;
+  expected_boxes: number;
+  expected_items: number;
+  created_at: string;
 }
 
 // ---------- QSeal ----------
