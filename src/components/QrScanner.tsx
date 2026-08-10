@@ -279,43 +279,37 @@ export default function QrScanner({ onScan, onClose, title, subtitle, showHardwa
           barcodeTypes: ['qr'],
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-      >
-        <View style={styles.overlay}>
-          {onClose && (
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
-          )}
-
-          <View style={styles.scanBox}>
-            <View style={[styles.corner, styles.topLeft]} />
-            <View style={[styles.corner, styles.topRight]} />
-            <View style={[styles.corner, styles.bottomLeft]} />
-            <View style={[styles.corner, styles.bottomRight]} />
-          </View>
-
-          <Text style={styles.title}>{title || 'Scan QR Code'}</Text>
-          <Text style={styles.subtitle}>
-            {subtitle || 'Align the QR code within the frame'}
-          </Text>
-
-          {scanned && (
-            <View style={styles.scannedIndicator}>
-              <Text style={styles.scannedIndicatorText}>✓ Scanned</Text>
-            </View>
-          )}
-
-          {/* Hardware scanner toggle — only shown when explicitly enabled */}
-          {showHardwareToggle && (
-            <TouchableOpacity
-              style={[styles.switchButton, { marginBottom: insets.bottom + 16 }]}
-              onPress={switchToHardware}
-            >
-              <Text style={styles.switchButtonText}>Use Hardware Scanner</Text>
-            </TouchableOpacity>
-          )}
+      />
+      <View style={styles.overlay} pointerEvents="box-none">
+        {onClose && (
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+        )}
+        <View style={styles.scanBox}>
+          <View style={[styles.corner, styles.topLeft]} />
+          <View style={[styles.corner, styles.topRight]} />
+          <View style={[styles.corner, styles.bottomLeft]} />
+          <View style={[styles.corner, styles.bottomRight]} />
         </View>
-      </CameraView>
+        <Text style={styles.title}>{title || 'Scan QR Code'}</Text>
+        <Text style={styles.subtitle}>
+          {subtitle || 'Align the QR code within the frame'}
+        </Text>
+        {scanned && (
+          <View style={styles.scannedIndicator}>
+            <Text style={styles.scannedIndicatorText}>✓ Scanned</Text>
+          </View>
+        )}
+        {showHardwareToggle && (
+          <TouchableOpacity
+            style={[styles.switchButton, { marginBottom: insets.bottom + 16 }]}
+            onPress={switchToHardware}
+          >
+            <Text style={styles.switchButtonText}>Use Hardware Scanner</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -362,7 +356,7 @@ const styles = StyleSheet.create({
   cancelButtonText: { color: '#aaa', fontSize: 16 },
 
   overlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
