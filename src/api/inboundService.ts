@@ -1,5 +1,5 @@
 // ============================================================
-// Inbound Service — Sessions, Scans, Receiving Slips
+// Inbound Service — Sessions, Scans, Receiving Slips, ASN
 // ============================================================
 import { coreClient } from './client';
 import type {
@@ -10,13 +10,20 @@ import type {
   SessionSummary,
   ReceivingSlip,
   PaginatedResponse,
+  AsnOrder,
+  AsnReceivingSummary,
+  FloatingItemsResponse,
+  ResolveFloatingRequest,
+  RejectItemRequest,
 } from '../types';
 
 // ---------- Start Scan Session ----------
 export async function startInboundSession(
   payload: StartSessionRequest
 ): Promise<InboundSession> {
+  console.log('[API] POST /inbound/sessions — payload:', JSON.stringify(payload));
   const { data } = await coreClient.post<InboundSession>('/inbound/sessions', payload);
+  console.log('[API] POST /inbound/sessions — response keys:', Object.keys(data));
   return data;
 }
 
@@ -42,9 +49,17 @@ export async function getSessionSummary(sessionId: string): Promise<SessionSumma
 
 // ---------- End Session (Generate Receiving Slip) ----------
 export async function endSession(sessionId: string): Promise<ReceivingSlip> {
+  console.log('[API] endSession called:', { sessionId });
   const { data } = await coreClient.post<ReceivingSlip>(
     `/inbound/sessions/${sessionId}/end`
   );
+  console.log('[API] endSession response:', {
+    slipId: data.id,
+    slipNumber: data.slip_number,
+    asn_order_id: (data as any).asn_order_id || 'NOT IN RESPONSE',
+    asn_order_no: (data as any).asn_order_no || 'NOT IN RESPONSE',
+    itemsCount: data.items?.length || 0,
+  });
   return data;
 }
 
@@ -87,11 +102,82 @@ export async function approveReceivingSlip(
 export async function flagLineItem(
   slipId: string,
   itemId: string,
-  flag: 'short' | 'damaged',
+  flag: 'short' | 'damaged' | 'rejected',
   notes?: string
 ): Promise<void> {
   await coreClient.post(
     `/inbound/receiving-slips/${slipId}/items/${itemId}/flag`,
     { flag, notes }
+  );
+}
+
+// ---------- ASN: Fetch ASN Orders ----------
+export async function getAsnOrders(params?: {
+  status?: string;
+  warehouse_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PaginatedResponse<AsnOrder>> {
+  const { data } = await coreClient.get<PaginatedResponse<AsnOrder>>(
+    '/asn-orders',
+    { params }
+  );
+  return data;
+}
+
+// ---------- ASN: Get Receiving Summary ----------
+export async function getAsnReceivingSummary(asnOrderId: string): Promise<AsnReceivingSummary> {
+  const { data } = await coreClient.get<AsnReceivingSummary>(
+    `/asn-orders/${asnOrderId}/receiving-summary`
+  );
+  return data;
+}
+
+// ---------- Link ASN to Session ----------
+export async function linkAsnToSession(
+  sessionId: string,
+  asnOrderId: string
+): Promise<InboundSession> {
+  const { data } = await coreClient.post<InboundSession>(
+    `/inbound/sessions/${sessionId}/link-asn`,
+    { asn_order_id: asnOrderId }
+  );
+  return data;
+}
+
+// ---------- Reject Slip Item ----------
+export async function rejectSlipItem(
+  slipId: string,
+  itemId: string,
+  payload: RejectItemRequest
+): Promise<ReceivingSlip> {
+  const { data } = await coreClient.post<ReceivingSlip>(
+    `/inbound/receiving-slips/${slipId}/items/${itemId}/reject`,
+    payload
+  );
+  return data;
+}
+
+// ---------- Get Floating Items ----------
+export async function getFloatingItems(params?: {
+  warehouse_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<FloatingItemsResponse> {
+  const { data } = await coreClient.get<FloatingItemsResponse>(
+    '/inbound/floating-items',
+    { params }
+  );
+  return data;
+}
+
+// ---------- Resolve Floating Item ----------
+export async function resolveFloatingItem(
+  itemId: string,
+  payload: ResolveFloatingRequest
+): Promise<void> {
+  await coreClient.post(
+    `/inbound/floating-items/${itemId}/resolve`,
+    payload
   );
 }

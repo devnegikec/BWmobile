@@ -92,11 +92,14 @@ export interface InboundSession {
   total_boxes_scanned: number;
   started_at: string;
   created_at: string;
+  asn_order_id?: string | null;
+  asn_order_no?: string | null;
 }
 
 export interface StartSessionRequest {
   warehouse_id: string;
   dock_location: string;
+  asn_order_id?: string;
 }
 
 export interface RecordScanRequest {
@@ -151,6 +154,8 @@ export interface ReceivingSlip {
   warehouse_id: string;
   status: 'pending_review' | 'pending_putaway' | 'putaway_complete' | 'rejected';
   created_at: string;
+  asn_order_id?: string | null;
+  asn_order_no?: string | null;
   items: ReceivingSlipItem[];
 }
 
@@ -160,8 +165,10 @@ export interface ReceivingSlipItem {
   batch_number: string;
   quantity: number;
   box_count: number;
-  flag: 'ok' | 'short' | 'damaged';
+  flag: 'ok' | 'short' | 'damaged' | 'rejected';
   notes: string | null;
+  rejection_reason?: string | null;
+  rejected_at?: string | null;
 }
 
 // ---------- Put-Away ----------
@@ -302,4 +309,128 @@ export interface QSealHistoryResponse {
 // ---------- API Error ----------
 export interface ApiError {
   detail: string;
+}
+
+// ---------- ASN Orders ----------
+export interface AsnOrder {
+  id: string;
+  organization_id: string;
+  asn_order_no: string;
+  status: 'draft' | 'confirmed' | 'partially_delivered' | 'delivered' | 'closed';
+  order_date?: string;
+  delivery_date?: string;
+  grand_total?: string;
+  from_warehouse?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  to_warehouse?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  created_at: string;
+  items?: AsnOrderItem[];
+}
+
+export interface AsnOrderItem {
+  id: string;
+  asn_order_id: string;
+  item_id: string;
+  sku: string;
+  item_name?: string;
+  qty: number;
+  delivered_qty: number;
+  batch_number?: string;
+}
+
+// ---------- ASN Receiving Summary ----------
+export interface AsnReceivingSummary {
+  asn_order_id: string;
+  asn_order_no: string;
+  asn_status: string;
+  expected_total_qty: number;
+  accepted_total_qty: number;
+  rejected_total_qty: number;
+  pending_total_qty: number;
+  over_total_qty: number;
+  total_line_items: number;
+  matched_items: number;
+  partial_items: number;
+  not_received_items: number;
+  over_items: number;
+  linked_slips: AsnLinkedSlip[];
+  line_items: AsnSummaryLineItem[];
+}
+
+export interface AsnLinkedSlip {
+  slip_id: string;
+  slip_number: string;
+  status: string;
+  created_at: string;
+  total_accepted_qty: number;
+  total_rejected_qty: number;
+  total_items: number;
+}
+
+export interface AsnSummaryLineItem {
+  asn_item_id: string;
+  item_id: string;
+  sku: string;
+  item_name: string;
+  expected_qty: number;
+  accepted_qty: number;
+  rejected_qty: number;
+  pending_qty: number;
+  over_qty: number;
+  status: 'matched' | 'partial' | 'not_received' | 'over';
+}
+
+// ---------- Floating Items ----------
+export interface FloatingItem {
+  slip_item_id: string;
+  slip_id: string;
+  slip_number: string;
+  sku: string;
+  batch_number: string;
+  quantity: number;
+  rejection_reason: string;
+  rejected_at: string;
+  warehouse_id: string;
+  asn_order_no?: string | null;
+}
+
+export interface FloatingItemsResponse {
+  floating_items: FloatingItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type FloatingResolveAction = 'accept' | 'return_to_sender' | 'dispose';
+
+export interface ResolveFloatingRequest {
+  action: FloatingResolveAction;
+  notes?: string;
+}
+
+// ---------- Link ASN Request ----------
+export interface LinkAsnRequest {
+  asn_order_id: string;
+}
+
+// ---------- Reject Item Request ----------
+export interface RejectItemRequest {
+  reason: string;
+  notes?: string;
+}
+
+// ---------- Item Rejection State (local, for review step) ----------
+export interface ItemRejectionState {
+  /** Maps "sku|batch_number" → rejection info */
+  [key: string]: {
+    rejected: boolean;
+    reason: string;
+  };
 }

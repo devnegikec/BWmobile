@@ -7,6 +7,8 @@ import type {
   ScanRecord,
   SessionSummary,
   ReceivingSlip,
+  AsnOrder,
+  ItemRejectionState,
 } from '../types';
 import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
@@ -19,6 +21,14 @@ interface InboundState {
   lastScan: ScanRecord | null;
   generatedSlip: ReceivingSlip | null;
 
+  // ASN
+  availableAsns: AsnOrder[];
+  selectedAsn: AsnOrder | null;
+  isFetchingAsns: boolean;
+
+  // Item rejection (review step)
+  itemRejections: ItemRejectionState;
+
   // UI state
   isScanning: boolean;
   isLoading: boolean;
@@ -29,7 +39,7 @@ interface InboundState {
   isFetchingLinkedUnits: boolean;
 
   // Actions
-  startSession: (warehouseId: string, dockLocation: string) => Promise<void>;
+  startSession: (warehouseId: string, dockLocation: string, asnOrderId?: string) => Promise<void>;
   recordScan: (qrData: string) => Promise<void>;
   fetchLinkedUnits: (parentId: string) => Promise<void>;
   clearLinkedUnits: () => void;
@@ -38,6 +48,16 @@ interface InboundState {
   clearSession: () => void;
   clearError: () => void;
   toggleScanning: () => void;
+
+  // ASN actions
+  fetchAsnOrders: (warehouseId: string) => Promise<void>;
+  selectAsn: (asn: AsnOrder | null) => void;
+  linkAsnToCurrentSession: (asnOrderId: string) => Promise<void>;
+
+  // Item rejection actions
+  toggleItemRejection: (sku: string, batchNumber: string, rejected: boolean, reason?: string) => void;
+  clearRejections: () => void;
+  rejectSlipItems: (slipId: string) => Promise<void>;
 }
 
 export const useInboundStore = create<InboundState>((set, get) => ({
@@ -50,22 +70,51 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   error: null,
   linkedUnitsParents: [],
   isFetchingLinkedUnits: false,
+  availableAsns: [],
+  selectedAsn: null,
+  isFetchingAsns: false,
+  itemRejections: {},
 
   // ---------- Start Session ----------
-  startSession: async (warehouseId, dockLocation) => {
+  startSession: async (warehouseId, dockLocation, asnOrderId?) => {
     set({ isLoading: true, error: null });
     try {
-      const session = await inboundService.startInboundSession({
+      const payload: { warehouse_id: string; dock_location: string; asn_order_id?: string } = {
         warehouse_id: warehouseId,
         dock_location: dockLocation,
+      };
+      if (asnOrderId) {
+        payload.asn_order_id = asnOrderId;
+      }
+      console.log('[Store] startSession — payload:', payload);
+      const session = await inboundService.startInboundSession(payload);
+      console.log('[Store] startSession — raw response keys:', Object.keys(session));
+      console.log('[Store] startSession — response ASN:', {
+        sessionId: session.id,
+        asn_order_id: (session as any).asn_order_id || 'NOT IN RESPONSE',
+        asn_order_no: (session as any).asn_order_no || 'NOT IN RESPONSE',
       });
+
+      // Backend may not return asn_order_id/no in the response — attach from the selected ASN
+      const selectedAsn = get().selectedAsn;
+      const sessionWithAsn = { ...session };
+      if (!sessionWithAsn.asn_order_id && asnOrderId) {
+        sessionWithAsn.asn_order_id = asnOrderId;
+        sessionWithAsn.asn_order_no = selectedAsn?.asn_order_no || undefined;
+        console.log('[Store] startSession — attached ASN from payload:', {
+          asn_order_id: asnOrderId,
+          asn_order_no: selectedAsn?.asn_order_no,
+        });
+      }
+
       set({
-        currentSession: session,
+        currentSession: sessionWithAsn,
         isScanning: true,
         sessionSummary: null,
         lastScan: null,
         generatedSlip: null,
         linkedUnitsParents: [],
+        itemRejections: {},
         isLoading: false,
       });
     } catch (error: any) {
@@ -170,15 +219,40 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   endSession: async () => {
     const session = get().currentSession;
     if (!session) throw new Error('No active session.');
+    console.log('[Store] endSession — current session ASN details:', {
+      sessionId: session.id,
+      asn_order_id: session.asn_order_id || 'NOT SET',
+      asn_order_no: session.asn_order_no || 'NOT SET',
+      dock: session.dock_location,
+      boxes: session.total_boxes_scanned,
+    });
     set({ isLoading: true });
     try {
       const slip = await inboundService.endSession(session.id);
+      // The end-session response may not include items — fetch the full slip
+      let fullSlip = slip;
+      if (!slip.items || slip.items.length === 0) {
+        try {
+          fullSlip = await inboundService.getReceivingSlip(slip.id);
+        } catch {
+          // Use the original slip if detail fetch fails
+          fullSlip = slip;
+        }
+      }
+      // Attach ASN reference from session if slip doesn't have it
+      if (!fullSlip.asn_order_id && session.asn_order_id) {
+        fullSlip = {
+          ...fullSlip,
+          asn_order_id: session.asn_order_id,
+          asn_order_no: session.asn_order_no || undefined,
+        };
+      }
       set({
-        generatedSlip: slip,
+        generatedSlip: fullSlip,
         isScanning: false,
         isLoading: false,
       });
-      return slip;
+      return fullSlip;
     } catch (error: any) {
       const status = error.response?.status;
       const detail = error.response?.data?.detail || '';
@@ -230,8 +304,101 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       generatedSlip: null,
       linkedUnitsParents: [],
       isScanning: false,
+      itemRejections: {},
+      selectedAsn: null,
     }),
 
   clearError: () => set({ error: null }),
   toggleScanning: () => set((s) => ({ isScanning: !s.isScanning })),
+
+  // ---------- ASN: Fetch Orders ----------
+  fetchAsnOrders: async (warehouseId: string) => {
+    set({ isFetchingAsns: true });
+    try {
+      const response = await inboundService.getAsnOrders({
+        warehouse_id: warehouseId,
+        page_size: 50,
+      });
+      // Response key might be 'asn_orders' or 'items'
+      const allOrders = (response as any).asn_orders || (response as any).items || [];
+      // Only show confirmed or partially_delivered ASNs (filter out drafts)
+      const orders = allOrders.filter(
+        (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'
+      );
+      set({ availableAsns: orders, isFetchingAsns: false });
+    } catch (error: any) {
+      const status = error?.response?.status;
+      // 404: ASN endpoint not yet deployed (backend migration pending)
+      // Treat gracefully — show empty list, blind receipts still work
+      if (status === 404) {
+        console.log('[ASN] Endpoint not available (404). ASN feature requires backend migration. Continuing with blind receipt.');
+        set({ availableAsns: [], isFetchingAsns: false });
+        return;
+      }
+      console.error('fetchAsnOrders failed:', error?.response?.data || error?.message);
+      set({ availableAsns: [], isFetchingAsns: false });
+    }
+  },
+
+  selectAsn: (asn) => set({ selectedAsn: asn }),
+
+  // ---------- ASN: Link to Current Session ----------
+  linkAsnToCurrentSession: async (asnOrderId: string) => {
+    const session = get().currentSession;
+    if (!session) {
+      set({ error: 'No active session.' });
+      return;
+    }
+    set({ isLoading: true, error: null });
+    try {
+      const updated = await inboundService.linkAsnToSession(session.id, asnOrderId);
+      set({
+        currentSession: updated,
+        isLoading: false,
+      });
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || 'Failed to link ASN.';
+      set({ isLoading: false, error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
+    }
+  },
+
+  // ---------- Item Rejection Toggle (local state) ----------
+  toggleItemRejection: (sku: string, batchNumber: string, rejected: boolean, reason?: string) => {
+    const key = `${sku}||${batchNumber}`;
+    set((state) => ({
+      itemRejections: {
+        ...state.itemRejections,
+        [key]: {
+          rejected,
+          reason: reason || (rejected ? 'Rejected during review' : ''),
+        },
+      },
+    }));
+  },
+
+  clearRejections: () => set({ itemRejections: {} }),
+
+  // ---------- Reject Slip Items (after slip creation) ----------
+  rejectSlipItems: async (slipId: string) => {
+    const slip = get().generatedSlip;
+    const rejections = get().itemRejections;
+    if (!slip || !slip.items?.length) return;
+
+    const itemsToReject = slip.items.filter((item) => {
+      const key = `${item.sku}||${item.batch_number}`;
+      return rejections[key]?.rejected;
+    });
+
+    for (const item of itemsToReject) {
+      const key = `${item.sku}||${item.batch_number}`;
+      const rejection = rejections[key];
+      try {
+        await inboundService.rejectSlipItem(slipId, item.id, {
+          reason: rejection?.reason || 'Rejected during review',
+        });
+      } catch (err: any) {
+        console.error(`Failed to reject item ${item.id}:`, err?.response?.data || err?.message);
+      }
+    }
+  },
 }));

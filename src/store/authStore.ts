@@ -185,12 +185,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   checkAuth: async () => {
     try {
       const token = await getAccessToken();
-      if (token) {
-        set({ isAuthenticated: true });
-        return true;
+      if (!token) {
+        set({ isAuthenticated: false });
+        return false;
       }
-      return false;
+      // Token exists — validate it by loading warehouses
+      // If this fails with 401, the interceptor clears tokens and triggers logout
+      try {
+        const warehouses = await authService.getMyWarehouses();
+        set({ isAuthenticated: true, warehouses });
+      } catch (err: any) {
+        // 401 = token invalid/expired, let interceptor handle cleanup
+        if (err?.response?.status === 401) {
+          set({ isAuthenticated: false });
+          return false;
+        }
+        // Network error — still allow (offline-first), but mark as needing refresh
+        set({ isAuthenticated: true });
+      }
+      return true;
     } catch {
+      set({ isAuthenticated: false });
       return false;
     }
   },

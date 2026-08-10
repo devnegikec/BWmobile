@@ -15,6 +15,7 @@ export default function DashboardScreen({ navigation }: any) {
   const {
     user,
     worker,
+    isAuthenticated,
     selectedWarehouse,
     warehouses,
     loadWarehouses,
@@ -23,6 +24,13 @@ export default function DashboardScreen({ navigation }: any) {
 
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
   const [warehouseError, setWarehouseError] = useState<string | null>(null);
+
+  // Redirect to login if no valid session
+  useEffect(() => {
+    if (!isAuthenticated || (!user && !worker)) {
+      logout();
+    }
+  }, [isAuthenticated, user, worker]);
 
   const displayName = user?.display_name || worker?.display_name || 'User';
 

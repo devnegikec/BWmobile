@@ -12,13 +12,15 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import QrScanner from '../components/QrScanner';
 import * as inboundService from '../api/inboundService';
 import * as qsealService from '../api/qsealService';
-import type { SessionSummary, ReceivingSlip } from '../types';
+import type { SessionSummary, ReceivingSlip, AsnOrder, SummaryItem } from '../types';
 import type { QSealParentWithUnits } from '../types';
 
 type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
@@ -26,6 +28,8 @@ type Step = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 // ---- Expandable Linked Units Table ----
 function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  if (!parents || parents.length === 0) return null;
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
@@ -36,7 +40,7 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
   };
 
   const boxCount = parents.length;
-  const itemCount = parents.reduce((sum, p) => sum + p.linked_units.length, 0);
+  const itemCount = parents.reduce((sum, p) => sum + (p.linked_units?.length || 0), 0);
 
   return (
     <View style={styles.tableContainer}>
@@ -59,7 +63,8 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
       {/* Parent rows */}
       {parents.map((parent, pIdx) => {
         const isOpen = expanded.has(parent.id);
-        const firstUnit = parent.linked_units[0];
+        const units = parent.linked_units || [];
+        const firstUnit = units[0];
         return (
           <View key={parent.id}>
             <TouchableOpacity
@@ -80,13 +85,13 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
                 {pIdx + 1}/{boxCount}
               </Text>
               <Text style={[styles.cell, styles.colQty]}>
-                {parent.linked_units.length}
+                {units.length}
               </Text>
             </TouchableOpacity>
 
             {/* Expanded: unit details */}
             {isOpen &&
-              parent.linked_units.map((unit) => (
+              units.map((unit) => (
                 <View key={unit.id} style={styles.unitRow}>
                   <Text style={[styles.cell, styles.colProduct]} numberOfLines={1}>
                     {'    '}└ {unit.serial_number}
@@ -109,15 +114,15 @@ function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
 }
 
 export default function InboundScreen({ navigation }: any) {
-  const { selectedWarehouse, user, worker } = useAuthStore();
+  const { selectedWarehouse, user, worker, isAuthenticated, logout } = useAuthStore();
   const orgId = user?.organization_id || worker?.organization_id || '';
-  console.log('[Inbound] orgId sources:', {
-    userOrgId: user?.organization_id,
-    workerOrgId: worker?.organization_id,
-    userKeys: user ? Object.keys(user) : 'null',
-    workerKeys: worker ? Object.keys(worker) : 'null',
-    final: orgId,
-  });
+
+  // Redirect to login if no valid user/worker session
+  useEffect(() => {
+    if (!isAuthenticated || (!user && !worker)) {
+      logout();
+    }
+  }, [isAuthenticated, user, worker]);
   const {
     currentSession,
     sessionSummary,
@@ -127,6 +132,10 @@ export default function InboundScreen({ navigation }: any) {
     isLoading,
     error,
     linkedUnitsParents,
+    availableAsns,
+    selectedAsn,
+    isFetchingAsns,
+    itemRejections,
     startSession,
     recordScan,
     clearLinkedUnits,
@@ -134,11 +143,18 @@ export default function InboundScreen({ navigation }: any) {
     endSession,
     clearSession,
     clearError,
+    fetchAsnOrders,
+    selectAsn,
+    toggleItemRejection,
+    rejectSlipItems,
   } = useInboundStore();
 
   const [step, setStep] = useState<Step>('idle');
   const [dockLocation, setDockLocation] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
+  const [showAsnPicker, setShowAsnPicker] = useState(false);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   // Sync step with store state
   useEffect(() => {
@@ -165,8 +181,12 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
     try {
-      clearLinkedUnits(); // Clear any linked units from previous session
-      await startSession(selectedWarehouse.id, dockLocation.trim());
+      clearLinkedUnits();
+      await startSession(
+        selectedWarehouse.id,
+        dockLocation.trim(),
+        selectedAsn?.id
+      );
       setStep('scanning');
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -247,16 +267,17 @@ export default function InboundScreen({ navigation }: any) {
       // Step 2: Fetch linked units (appends to the list)
       console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
-      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units.length);
+      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units?.length || 0);
       // Add to store for display
       useInboundStore.setState((s) => ({
         linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
       }));
 
       // Step 3: Record each linked unit's product_item_url as a scan
-      if (parentWithUnits.linked_units.length > 0) {
+      const units = parentWithUnits.linked_units || [];
+      if (units.length > 0) {
         let scannedCount = 0;
-        for (const unit of parentWithUnits.linked_units) {
+        for (const unit of units) {
           const url = unit.product_item_url || unit.serial_number;
           console.log('[Inbound] Step 3: recordScan linked unit:', {
             serial: unit.serial_number,
@@ -274,14 +295,8 @@ export default function InboundScreen({ navigation }: any) {
             });
           }
         }
-        console.log('[Inbound] Step 3 done:', scannedCount, '/', parentWithUnits.linked_units.length, 'recorded');
-        const boxCount = useInboundStore.getState().linkedUnitsParents.length;
-        if (scannedCount > 0) {
-          Alert.alert(
-            'QSeal Processed',
-            `Box ${boxCount}: ${parentWithUnits.name}\n${scannedCount} item(s) recorded.`
-          );
-        }
+        console.log('[Inbound] Step 3 done:', scannedCount, '/', units.length, 'recorded');
+        // QSeal info shown in the compact count bar — no popup needed
       }
     } catch (err: any) {
       console.log('[Inbound] QSeal scan FAILED:', {
@@ -307,29 +322,37 @@ export default function InboundScreen({ navigation }: any) {
   };
 
   const handleEndSession = async () => {
-    Alert.alert(
-      'End Session',
-      'This will generate a receiving slip. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'End Session',
-          onPress: async () => {
-            try {
-              await endSession();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
+    const rejectionCount = Object.values(itemRejections).filter((r) => r.rejected).length;
+    const message =
+      rejectionCount > 0
+        ? `This will generate a receiving slip with ${rejectionCount} item(s) marked for rejection. Continue?`
+        : 'This will generate a receiving slip. Continue?';
+
+    Alert.alert('End Session', message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'End Session',
+        onPress: async () => {
+          try {
+            const slip = await endSession();
+            // After slip is created, reject marked items
+            if (Object.values(itemRejections).some((r) => r.rejected)) {
+              await rejectSlipItems(slip.id);
             }
-          },
+          } catch (err: any) {
+            Alert.alert('Error', err.message);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleNewSession = () => {
     clearSession();
     clearLinkedUnits();
     setDockLocation('');
+    setShowAsnPicker(false);
+    setExpandedParents(new Set());
     setStep('idle');
   };
 
@@ -361,6 +384,40 @@ export default function InboundScreen({ navigation }: any) {
             />
           </View>
 
+          {/* ASN Selection (Optional) */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>ASN Reference (Optional)</Text>
+            {selectedAsn ? (
+              <View style={styles.asnSelectedRow}>
+                <View style={styles.asnSelectedInfo}>
+                  <Text style={styles.asnSelectedNo}>{selectedAsn.asn_order_no}</Text>
+                  <Text style={styles.asnSelectedStatus}>{selectedAsn.status}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.asnClearButton}
+                  onPress={() => selectAsn(null)}
+                >
+                  <Text style={styles.asnClearText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.asnPickerButton}
+                onPress={() => {
+                  if (selectedWarehouse) {
+                    fetchAsnOrders(selectedWarehouse.id);
+                  }
+                  setShowAsnPicker(true);
+                }}
+              >
+                <Text style={styles.asnPickerButtonText}>
+                  {isFetchingAsns ? 'Loading...' : 'Select ASN (tap to choose)'}
+                </Text>
+                <Text style={styles.asnPickerArrow}>▼</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           <TouchableOpacity
             style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
             onPress={handleStartSession}
@@ -373,6 +430,88 @@ export default function InboundScreen({ navigation }: any) {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* ASN Picker Modal */}
+        <Modal
+          visible={showAsnPicker}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowAsnPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select ASN</Text>
+                <TouchableOpacity onPress={() => setShowAsnPicker(false)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isFetchingAsns ? (
+                <ActivityIndicator color="#1A73E8" style={{ padding: 40 }} />
+              ) : availableAsns.length === 0 ? (
+                <View style={styles.emptyAsnState}>
+                  <Text style={styles.emptyAsnText}>No confirmed ASNs found</Text>
+                  <Text style={styles.emptyAsnSubtext}>
+                    You can still start a blind receipt without an ASN.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={availableAsns}
+                  keyExtractor={(item) => item.id}
+                  style={styles.asnList}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.asnListItem,
+                        selectedAsn?.id === item.id && styles.asnListItemSelected,
+                      ]}
+                      onPress={() => {
+                        selectAsn(item);
+                        setShowAsnPicker(false);
+                      }}
+                    >
+                      <View style={styles.asnListItemInfo}>
+                        <Text style={styles.asnListItemNo}>{item.asn_order_no}</Text>
+                        <Text style={styles.asnListItemSrc}>
+                          From: {item.from_warehouse?.name || 'N/A'}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.asnStatusBadge,
+                          {
+                            backgroundColor:
+                              item.status === 'confirmed'
+                                ? '#3B82F6'
+                                : item.status === 'partially_delivered'
+                                ? '#F59E0B'
+                                : '#6B7280',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.asnStatusBadgeText}>
+                          {item.status.replace('_', ' ')}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+
+              <TouchableOpacity
+                style={[styles.secondaryButton, { marginTop: 12 }]}
+                onPress={() => {
+                  selectAsn(null);
+                  setShowAsnPicker(false);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Clear Selection (Blind Receipt)</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -386,6 +525,9 @@ export default function InboundScreen({ navigation }: any) {
           <View style={styles.sessionInfo}>
             <Text style={styles.sessionLabel}>Session Active</Text>
             <Text style={styles.sessionDock}>{currentSession.dock_location}</Text>
+            {currentSession.asn_order_no && (
+              <Text style={styles.sessionAsn}>📋 {currentSession.asn_order_no}</Text>
+            )}
           </View>
           <View style={styles.scanCount}>
             <Text style={styles.scanCountNum}>
@@ -411,15 +553,21 @@ export default function InboundScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* QSeal Linked Units — expandable table */}
+        {/* QSeal count bar (compact) */}
         {isProcessingQSeal && (
           <View style={styles.linkedUnitsLoading}>
             <ActivityIndicator size="small" color="#1A73E8" />
             <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
           </View>
         )}
-        {linkedUnitsParents.length > 0 && (
-          <LinkedUnitsTable parents={linkedUnitsParents} />
+        {linkedUnitsParents?.length > 0 && (
+          <View style={styles.qsealCountBar}>
+            <Text style={styles.qsealCountText}>
+              📦 {linkedUnitsParents.length} box{linkedUnitsParents.length > 1 ? 'es' : ''}
+              {' · '}
+              📋 {linkedUnitsParents.reduce((sum, p) => sum + (p.linked_units?.length || 0), 0)} item(s)
+            </Text>
+          </View>
         )}
 
         {/* Action buttons */}
@@ -444,6 +592,144 @@ export default function InboundScreen({ navigation }: any) {
 
   // ============ RENDER: SUMMARY ============
   if (step === 'summary' && sessionSummary && currentSession) {
+    // ---- Build unified table rows ----
+    interface TableRow {
+      key: string;
+      type: 'qseal-parent' | 'qseal-child' | 'scan-batch';
+      productName: string;
+      sku: string;
+      batchNumber: string;
+      boxCount: number;
+      itemCount: number;
+      rejectKey: string;
+      parentKey?: string;
+      depth: number;
+      isExpandable: boolean;
+    }
+
+    const rows: TableRow[] = [];
+
+    // 1. QSeal parents + children
+    linkedUnitsParents.forEach((parent) => {
+      const units = parent.linked_units || [];
+      const firstUnit = units[0];
+      const parentKey = `qseal-parent||${parent.id}`;
+      const parentRejected = itemRejections[parentKey]?.rejected || false;
+
+      rows.push({
+        key: parentKey,
+        type: 'qseal-parent',
+        productName: firstUnit?.product_name || parent.name,
+        sku: firstUnit?.product_sku || '-',
+        batchNumber: firstUnit?.dispatch_batch || '-',
+        boxCount: 1,
+        itemCount: units.length,
+        rejectKey: parentKey,
+        depth: 0,
+        isExpandable: units.length > 0,
+      });
+
+      units.forEach((unit) => {
+        const childKey = `qseal-child||${unit.id}`;
+        rows.push({
+          key: childKey,
+          type: 'qseal-child',
+          productName: unit.serial_number,
+          sku: unit.product_sku || '-',
+          batchNumber: unit.dispatch_batch || '-',
+          boxCount: 1,
+          itemCount: 1,
+          rejectKey: childKey,
+          parentKey: parentKey,
+          depth: 1,
+          isExpandable: false,
+        });
+      });
+    });
+
+    // Compute reject states
+    const getIsRejected = (row: TableRow) => itemRejections[row.rejectKey]?.rejected || false;
+    const getRejectReason = (row: TableRow) => itemRejections[row.rejectKey]?.reason || '';
+
+    const rejectedRows = rows.filter((r) => getIsRejected(r));
+    const rejectedCount = rejectedRows.length;
+
+    // Helper: reject a parent + all its children
+    const rejectParent = (parentKey: string, reason: string) => {
+      // Find parent and children
+      const parent = rows.find((r) => r.key === parentKey);
+      if (!parent) return;
+      toggleItemRejection(parent.sku, parent.batchNumber, true, reason);
+      // Also set the parent key
+      useInboundStore.setState((s) => ({
+        itemRejections: {
+          ...s.itemRejections,
+          [parentKey]: { rejected: true, reason },
+        },
+      }));
+      // Cascade to children
+      rows
+        .filter((r) => r.parentKey === parentKey)
+        .forEach((child) => {
+          useInboundStore.setState((s) => ({
+            itemRejections: {
+              ...s.itemRejections,
+              [child.rejectKey]: { rejected: true, reason: `Parent rejected: ${reason}` },
+            },
+          }));
+        });
+    };
+
+    // Helper: reject a single row
+    const rejectRow = (row: TableRow, reason: string) => {
+      if (row.type === 'qseal-parent') {
+        rejectParent(row.rejectKey, reason);
+      } else {
+        toggleItemRejection(row.sku, row.batchNumber, true, reason);
+        useInboundStore.setState((s) => ({
+          itemRejections: {
+            ...s.itemRejections,
+            [row.rejectKey]: { rejected: true, reason },
+          },
+        }));
+      }
+    };
+
+    // Helper: unreject
+    const unrejectRow = (row: TableRow) => {
+      if (row.type === 'qseal-parent') {
+        useInboundStore.setState((s) => {
+          const next = { ...s.itemRejections };
+          delete next[row.rejectKey];
+          rows
+            .filter((r) => r.parentKey === row.rejectKey)
+            .forEach((child) => delete next[child.rejectKey]);
+          return { itemRejections: next };
+        });
+      } else {
+        toggleItemRejection(row.sku, row.batchNumber, false);
+        useInboundStore.setState((s) => {
+          const next = { ...s.itemRejections };
+          delete next[row.rejectKey];
+          return { itemRejections: next };
+        });
+      }
+    };
+
+    const toggleExpand = (key: string) => {
+      setExpandedParents((prev) => {
+        const next = new Set(prev);
+        next.has(key) ? next.delete(key) : next.add(key);
+        return next;
+      });
+    };
+
+    // Visible rows: parents always visible; children only if parent expanded
+    const visibleRows = rows.filter((r) => {
+      if (r.depth === 0) return true;
+      return r.parentKey && expandedParents.has(r.parentKey);
+    });
+
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.summaryContent}>
         <View style={styles.header}>
@@ -451,24 +737,187 @@ export default function InboundScreen({ navigation }: any) {
           <Text style={styles.headerSubtitle}>
             {sessionSummary.total_boxes} boxes · {sessionSummary.total_quantity} qty
           </Text>
+          {currentSession.asn_order_no && (
+            <Text style={styles.summaryAsnRef}>📋 Linked to {currentSession.asn_order_no}</Text>
+          )}
         </View>
 
-        {sessionSummary.items.map((item, idx) => (
-          <View key={idx} style={styles.summaryCard}>
-            <Text style={styles.summarySku}>{item.sku}</Text>
-            <Text style={styles.summaryDetail}>
-              {item.total_boxes} boxes · {item.total_quantity} total qty
+        {/* Rejection summary bar */}
+        {rejectedCount > 0 && (
+          <View style={styles.rejectionSummaryBar}>
+            <Text style={styles.rejectionSummaryText}>
+              ⚠️ {rejectedCount} item(s) marked for rejection
             </Text>
-            {item.batches.map((batch, bIdx) => (
-              <View key={bIdx} style={styles.batchRow}>
-                <Text style={styles.batchBadge}>{batch.batch_number}</Text>
-                <Text style={styles.batchDetail}>
-                  {batch.quantity} qty · {batch.box_count} boxes
-                </Text>
-              </View>
-            ))}
           </View>
-        ))}
+        )}
+
+        {/* ---- MAIN TABLE ---- */}
+        <View style={styles.unifiedTable}>
+          {/* Column headers */}
+          <View style={styles.utColHeaders}>
+            <Text style={[styles.utColHeader, styles.utColProduct]}>Product / SKU</Text>
+            <Text style={[styles.utColHeader, styles.utColBatch]}>Batch</Text>
+            <Text style={[styles.utColHeader, styles.utColBoxes]}>Boxes / Items</Text>
+            <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>
+          </View>
+
+          {visibleRows.map((row) => {
+            const isRejected = getIsRejected(row);
+            const isChild = row.depth > 0;
+            const isExpanded = row.isExpandable && expandedParents.has(row.key);
+
+            return (
+              <TouchableOpacity
+                key={row.key}
+                style={[
+                  styles.utRow,
+                  isChild && styles.utRowChild,
+                  isRejected && styles.utRowRejected,
+                ]}
+                onPress={() => {
+                  if (row.isExpandable) toggleExpand(row.key);
+                }}
+                activeOpacity={row.isExpandable ? 0.7 : 1}
+                disabled={!row.isExpandable}
+              >
+                {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
+                <View style={[styles.utCell, styles.utColProduct]}>
+                  {isChild ? (
+                    <>
+                      <Text
+                        style={[styles.utSerialNumber, isRejected && styles.utTextRejected]}
+                        numberOfLines={1}
+                      >
+                        {'  '}{row.productName}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text
+                        style={[styles.utProductName, isRejected && styles.utTextRejected]}
+                        numberOfLines={1}
+                      >
+                        {row.isExpandable ? (isExpanded ? '▼ ' : '▶ ') : ''}{row.productName}
+                      </Text>
+                      <Text style={[styles.utSku, isRejected && styles.utTextRejected]}>
+                        {row.sku}
+                      </Text>
+                    </>
+                  )}
+                </View>
+
+                {/* Col 2: Batch */}
+                <View style={[styles.utCell, styles.utColBatch]}>
+                  <Text style={[styles.utBatch, isRejected && styles.utTextRejected]}>
+                    {row.batchNumber}
+                  </Text>
+                </View>
+
+                {/* Col 3: Boxes/Items (parent) or Qty (child) */}
+                <View style={[styles.utCell, styles.utColBoxes]}>
+                  <Text style={[styles.utBoxItems, isRejected && styles.utTextRejected]}>
+                    {isChild ? row.itemCount : `${row.boxCount}/${row.itemCount}`}
+                  </Text>
+                </View>
+
+                {/* Col 4: Action */}
+                <View style={[styles.utCell, styles.utColAction]}>
+                  <TouchableOpacity
+                    style={[styles.utRejectBtn, isRejected && styles.utRejectBtnActive]}
+                    onPress={() => {
+                      if (isRejected) {
+                        unrejectRow(row);
+                      } else {
+                        const label = row.type === 'qseal-parent'
+                          ? `${row.productName} (+${row.itemCount} items)`
+                          : row.productName;
+                        Alert.alert(
+                          'Confirm Rejection',
+                          `Reject "${label}"?\nThis will move it to the reject list.`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Reject',
+                              style: 'destructive',
+                              onPress: () => rejectRow(row, 'Rejected during review'),
+                            },
+                          ]
+                        );
+                      }
+                    }}
+                  >
+                    <Text style={[styles.utRejectBtnText, isRejected && styles.utRejectBtnTextActive]}>
+                      {isRejected ? 'Rejected' : 'Reject'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ---- REJECT LIST ---- */}
+        {rejectedRows.length > 0 && (
+          <View style={styles.rejectListContainer}>
+            <View style={styles.rejectListHeader}>
+              <Text style={styles.rejectListTitle}>
+                🚫 Rejected Items ({rejectedRows.length})
+              </Text>
+            </View>
+
+            {/* Column headers (same format) */}
+            <View style={styles.utColHeaders}>
+              <Text style={[styles.utColHeader, styles.utColProduct]}>Product / SKU</Text>
+              <Text style={[styles.utColHeader, styles.utColBatch]}>Batch</Text>
+              <Text style={[styles.utColHeader, styles.utColBoxes]}>Boxes / Items</Text>
+              <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>
+            </View>
+
+            {rejectedRows.map((row) => {
+              const reason = getRejectReason(row);
+              const isChild = row.depth > 0;
+
+              return (
+                <View key={`rej-${row.key}`} style={[styles.utRow, styles.utRowRejected, isChild && styles.utRowChild]}>
+                  {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
+                  <View style={[styles.utCell, styles.utColProduct]}>
+                    {isChild ? (
+                      <Text style={[styles.utSerialNumber, styles.utTextRejected]} numberOfLines={1}>
+                        {'  └ '}{row.productName}
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={1}>
+                          {row.productName}
+                        </Text>
+                        <Text style={[styles.utSku, styles.utTextRejected]}>{row.sku}</Text>
+                      </>
+                    )}
+                    {reason ? (
+                      <Text style={styles.rejectListReason} numberOfLines={1}>{reason}</Text>
+                    ) : null}
+                  </View>
+                  <View style={[styles.utCell, styles.utColBatch]}>
+                    <Text style={[styles.utBatch, styles.utTextRejected]}>{row.batchNumber}</Text>
+                  </View>
+                  <View style={[styles.utCell, styles.utColBoxes]}>
+                    <Text style={[styles.utBoxItems, styles.utTextRejected]}>
+                      {isChild ? row.itemCount : `${row.boxCount}/${row.itemCount}`}
+                    </Text>
+                  </View>
+                  <View style={[styles.utCell, styles.utColAction]}>
+                    <TouchableOpacity
+                      style={styles.utUndoBtn}
+                      onPress={() => unrejectRow(row)}
+                    >
+                      <Text style={styles.utUndoBtnText}>Undo</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         <View style={styles.summaryActions}>
           <TouchableOpacity
@@ -482,7 +931,9 @@ export default function InboundScreen({ navigation }: any) {
             style={styles.endButton}
             onPress={handleEndSession}
           >
-            <Text style={styles.endButtonText}>End & Generate Slip</Text>
+            <Text style={styles.endButtonText}>
+              End & Generate Slip{rejectedCount > 0 ? ` (${rejectedCount} rejected)` : ''}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -500,12 +951,15 @@ export default function InboundScreen({ navigation }: any) {
           <View style={styles.statusBadge}>
             <Text style={styles.statusText}>{generatedSlip.status}</Text>
           </View>
+          {generatedSlip.asn_order_no && (
+            <Text style={styles.slipAsnRef}>📋 {generatedSlip.asn_order_no}</Text>
+          )}
         </View>
 
         {/* Slip Items */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>Items ({generatedSlip.items.length})</Text>
-          {generatedSlip.items.map((item) => (
+          <Text style={styles.sectionCardTitle}>Items ({generatedSlip.items?.length || 0})</Text>
+          {generatedSlip.items?.map((item) => (
             <View key={item.id} style={styles.itemRow}>
               <View style={styles.itemInfo}>
                 <Text style={styles.itemSku}>{item.sku}</Text>
@@ -519,7 +973,7 @@ export default function InboundScreen({ navigation }: any) {
         </View>
 
         {/* QSeal Linked Units */}
-        {linkedUnitsParents.length > 0 && (
+        {linkedUnitsParents?.length > 0 && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
             <LinkedUnitsTable parents={linkedUnitsParents} />
@@ -790,6 +1244,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  slipAsnRef: {
+    color: '#60A5FA',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 10,
+  },
   sectionCard: {
     backgroundColor: '#1A2332',
     borderRadius: 12,
@@ -923,4 +1383,377 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
+
+  // ---- QSeal Compact Count Bar ----
+  qsealCountBar: {
+    backgroundColor: '#1A2332',
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  qsealCountText: {
+    color: '#4ADE80',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // ---- ASN Picker ----
+  asnPickerButton: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  asnPickerButtonText: {
+    color: '#8899AA',
+    fontSize: 15,
+  },
+  asnPickerArrow: {
+    color: '#667788',
+    fontSize: 12,
+  },
+  asnSelectedRow: {
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  asnSelectedInfo: {
+    flex: 1,
+  },
+  asnSelectedNo: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  asnSelectedStatus: {
+    color: '#3B82F6',
+    fontSize: 12,
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  asnClearButton: {
+    padding: 8,
+  },
+  asnClearText: {
+    color: '#EF4444',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+
+  // ---- ASN Modal ----
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#1A2332',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 30,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalClose: {
+    color: '#8899AA',
+    fontSize: 22,
+    padding: 4,
+  },
+  asnList: {
+    maxHeight: 400,
+  },
+  asnListItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  asnListItemSelected: {
+    backgroundColor: 'rgba(26,115,232,0.1)',
+  },
+  asnListItemInfo: {
+    flex: 1,
+  },
+  asnListItemNo: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  asnListItemSrc: {
+    color: '#8899AA',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  asnStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 12,
+  },
+  asnStatusBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  emptyAsnState: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyAsnText: {
+    color: '#8899AA',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  emptyAsnSubtext: {
+    color: '#667788',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+
+  // ---- Session ASN reference ----
+  sessionAsn: {
+    color: '#60A5FA',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+
+  // ---- Summary ASN reference ----
+  summaryAsnRef: {
+    color: '#60A5FA',
+    fontSize: 13,
+    marginTop: 6,
+  },
+
+  // ---- Rejection Summary Bar ----
+  rejectionSummaryBar: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    marginHorizontal: 24,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+  },
+  rejectionSummaryText: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // ---- Summary Item Header (with reject toggle) ----
+  summaryItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  summaryItemInfo: {
+    flex: 1,
+  },
+  summaryCardRejected: {
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    opacity: 0.85,
+  },
+  summarySkuRejected: {
+    color: '#EF4444',
+    textDecorationLine: 'line-through',
+  },
+  rejectIconButton: {
+    padding: 8,
+    marginLeft: 12,
+  },
+  rejectIcon: {
+    fontSize: 22,
+    opacity: 0.5,
+  },
+  rejectIconActive: {
+    fontSize: 22,
+    opacity: 1,
+  },
+  rejectionReasonRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(239,68,68,0.2)',
+  },
+  rejectionReasonLabel: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rejectionReasonText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    flex: 1,
+  },
+
+  // ---- Unified Summary Table ----
+  unifiedTable: {
+    marginHorizontal: 5,
+    marginTop: 16,
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    overflow: 'hidden',
+  },
+  utColHeaders: {
+    flexDirection: 'row',
+    backgroundColor: '#0F1923',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  utColHeader: {
+    color: '#667788',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  utColProduct: { flex: 5, minWidth: 0 },
+  utColBatch: { flex: 2, minWidth: 0 },
+  utColBoxes: { width: 55, alignItems: 'center' as const },
+  utColAction: { width: 62, alignItems: 'flex-end' as const },
+  utRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0F1923',
+  },
+  utRowChild: {
+    backgroundColor: '#0F1923',
+    paddingLeft: 6,
+  },
+  utRowRejected: {
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#EF4444',
+  },
+  utCell: {
+    justifyContent: 'center',
+  },
+  utProductName: {
+    color: '#E0E8F0',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  utSerialNumber: {
+    color: '#8899AA',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  utSku: {
+    color: '#667788',
+    fontSize: 10,
+    marginTop: 1,
+  },
+  utBatch: {
+    color: '#8899AA',
+    fontSize: 11,
+  },
+  utBoxItems: {
+    color: '#B0C4D8',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  utTextRejected: {
+    color: '#FCA5A5',
+    textDecorationLine: 'line-through' as const,
+  },
+  utRejectBtn: {
+    backgroundColor: '#2A3A4A',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  utRejectBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  utRejectBtnText: {
+    color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  utRejectBtnTextActive: {
+    color: '#fff',
+  },
+  utUndoBtn: {
+    backgroundColor: 'rgba(245,158,11,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  utUndoBtnText: {
+    color: '#F59E0B',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // ---- Reject List ----
+  rejectListContainer: {
+    marginHorizontal: 5,
+    marginTop: 24,
+    backgroundColor: '#1A2332',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    overflow: 'hidden',
+  },
+  rejectListHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EF4444',
+  },
+  rejectListTitle: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  rejectListReason: {
+    color: '#FCA5A5',
+    fontSize: 9,
+    marginTop: 2,
+  },
 });
