@@ -160,7 +160,8 @@ export default function AppNavigator() {
           >
             <RootStack.Screen name="AppTabs" component={AppTabs} />
             <RootStack.Screen name="QsealCascade" component={QsealCascadeScreen} />
-            <RootStack.Screen name="DirectPutaway" component={DirectPutawayScreen} />
+            <RootStack.Screen name="DirectPutaway" component={DirectPutawayScreen}
+              options={{ presentation: 'modal' }} />
           </RootStack.Navigator>
         ) : (
           <AuthNavigator />

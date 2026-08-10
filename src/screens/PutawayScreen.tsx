@@ -14,14 +14,18 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import * as putawayService from '../api/putawayService';
 import QrScanner from '../components/QrScanner';
 import type { PutAwayList, PutAwayItem } from '../types';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type ViewMode = 'list' | 'detail';
 
-export default function PutawayScreen({ navigation }: any) {
+export default function PutawayScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { selectedWarehouse, worker } = useAuthStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
