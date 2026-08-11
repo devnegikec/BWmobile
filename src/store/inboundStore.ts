@@ -388,11 +388,16 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     }
 
     // Extract items from groups (new format) or items (legacy format)
-    const allItems: { id: string; sku: string; batch_number: string | null }[] = [];
+    const allItems: { id: string; sku: string; batch_number: string | null; serial_number?: string }[] = [];
     if (slip.groups && slip.groups.length > 0) {
       for (const group of slip.groups) {
         for (const item of group.items) {
-          allItems.push({ id: item.id, sku: item.sku, batch_number: item.batch_number });
+          allItems.push({
+            id: item.id,
+            sku: item.sku,
+            batch_number: item.batch_number,
+            serial_number: item.serial_number, // unique item identifier
+          });
         }
       }
     } else if (slip.items && slip.items.length > 0) {
@@ -406,14 +411,26 @@ export const useInboundStore = create<InboundState>((set, get) => ({
 
     console.log('[rejectSlipItems] Starting rejection for slip:', slipId);
     console.log('[rejectSlipItems] Rejection keys:', Object.keys(rejections));
-    console.log('[rejectSlipItems] Slip items:', allItems.map(i => ({ id: i.id, sku: i.sku, batch: i.batch_number })));
+    console.log('[rejectSlipItems] Slip items:', allItems.map(i => ({ id: i.id, sku: i.sku, batch: i.batch_number, serial: i.serial_number })));
 
     const itemsToReject = allItems.filter((item) => {
-      const key = `${item.sku}||${item.batch_number || ''}`;
-      return rejections[key]?.rejected;
+      // Primary match: serial_number (unique item identifier)
+      const serial = item.serial_number || item.batch_number || '';
+      if (serial && rejections[serial]?.rejected) return true;
+      // Fallback: sku||batch_number
+      const skuBatchKey = `${item.sku}||${item.batch_number || ''}`;
+      return rejections[skuBatchKey]?.rejected;
     });
 
-    console.log('[rejectSlipItems] Items to reject:', itemsToReject.length, 'out of', allItems.length);
+    // Deduplicate by item.id (multiple QSeal children may map to same aggregated slip row)
+    const uniqueItems = new Map<string, typeof itemsToReject[0]>();
+    for (const item of itemsToReject) {
+      if (!uniqueItems.has(item.id)) {
+        uniqueItems.set(item.id, item);
+      }
+    }
+
+    console.log('[rejectSlipItems] Items to reject:', uniqueItems.size, '(deduplicated from', itemsToReject.length, ')');
 
     if (itemsToReject.length === 0) {
       console.warn('[rejectSlipItems] No items matched rejection keys. Keys:', Object.keys(rejections));
@@ -425,7 +442,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     let successCount = 0;
     let failCount = 0;
 
-    for (const item of itemsToReject) {
+    for (const item of uniqueItems.values()) {
       const key = `${item.sku}||${item.batch_number || ''}`;
       const rejection = rejections[key];
       try {
@@ -445,6 +462,6 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       }
     }
 
-    console.log('[rejectSlipItems] Done:', { successCount, failCount, total: itemsToReject.length });
+    console.log('[rejectSlipItems] Done:', { successCount, failCount, total: uniqueItems.size });
   },
 }));

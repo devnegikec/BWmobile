@@ -170,6 +170,7 @@ export interface ReceivingSlipGroup {
     id: string;
     serial_number: string;
     name: string;
+    batch: string;  // batch name from QSealTrack.name
     qseal_type: string;
     capacity: number;
   };
@@ -179,9 +180,9 @@ export interface ReceivingSlipGroup {
 
 export interface ReceivingSlipGroupItem {
   id: string;
-  serial_number: string;
+  serial_number: string;  // unique item identifier
   sku: string;
-  batch_number: string;
+  batch_number: string;   // actual dispatch batch from QSeal
   manufacturing_date?: string;
   expiry_date?: string;
   quantity: number;

@@ -632,7 +632,9 @@ export default function InboundScreen({ navigation }: any) {
           type: 'qseal-child',
           productName: unit.serial_number,
           sku: unit.product_sku || '-',
-          batchNumber: unit.dispatch_batch || '-',
+          // Use serial_number for matching because the slip API
+          // returns batch_number = serial_number
+          batchNumber: unit.serial_number || unit.dispatch_batch || '-',
           boxCount: 1,
           itemCount: 1,
           rejectKey: childKey,
@@ -682,10 +684,13 @@ export default function InboundScreen({ navigation }: any) {
         rejectParent(row.rejectKey, reason);
       } else {
         toggleItemRejection(row.sku, row.batchNumber, true, reason);
+        // Also store by serial number (batchNumber = serial for child items)
+        const serialNumber = row.batchNumber; // Now equals serial_number
         useInboundStore.setState((s) => ({
           itemRejections: {
             ...s.itemRejections,
             [row.rejectKey]: { rejected: true, reason },
+            ...(serialNumber && serialNumber !== '-' ? { [serialNumber]: { rejected: true, reason } } : {}),
           },
         }));
       }
