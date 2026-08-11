@@ -153,10 +153,41 @@ export interface ReceivingSlip {
   session_id: string;
   warehouse_id: string;
   status: 'pending_review' | 'pending_putaway' | 'putaway_complete' | 'rejected';
+  total_boxes?: number;
+  total_items?: number;
   created_at: string;
   asn_order_id?: string | null;
   asn_order_no?: string | null;
-  items: ReceivingSlipItem[];
+  /** New grouped format from API */
+  groups?: ReceivingSlipGroup[];
+  /** Legacy flat format */
+  items?: ReceivingSlipItem[];
+}
+
+// Group format (matches backend response)
+export interface ReceivingSlipGroup {
+  parent_qseal: {
+    id: string;
+    serial_number: string;
+    name: string;
+    qseal_type: string;
+    capacity: number;
+  };
+  product_name: string;
+  items: ReceivingSlipGroupItem[];
+}
+
+export interface ReceivingSlipGroupItem {
+  id: string;
+  serial_number: string;
+  sku: string;
+  batch_number: string;
+  manufacturing_date?: string;
+  expiry_date?: string;
+  quantity: number;
+  box_count: number;
+  flag: string;
+  notes: string | null;
 }
 
 export interface ReceivingSlipItem {
@@ -208,6 +239,45 @@ export interface PutAwayItem {
   status: 'pending' | 'completed' | 'skipped';
   notes?: string | null;
   completed_at?: string | null;
+}
+
+// ---------- Dual-Axis Put-Away (QR-based) ----------
+export interface TrackingItem {
+  id: string;
+  organization_id: string;
+  warehouse_id: string;
+  scan_session_id: string;
+  scan_session_item_id: string;
+  qr_identifier: string;
+  item_id: string;
+  sku: string;
+  batch_number: string | null;
+  quantity: number;
+  receiving_status: 'scanned' | 'approved' | 'rejected';
+  receiving_slip_id: string | null;
+  putaway_status: 'pending' | 'completed';
+  bin_location_id: string | null;
+  stock_entered: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompletePutawayRequest {
+  qr: string;
+  bin_id: string;
+  quantity?: number;
+}
+
+export interface CompletePutawayResponse {
+  id: string;
+  qr_identifier: string;
+  sku: string;
+  batch_number: string;
+  quantity: number;
+  bin_location_id: string;
+  putaway_status: 'completed';
+  stock_entered: boolean;
+  completed_at: string;
 }
 
 // ---------- FIFO Bin Suggestions (Workflow B) ----------

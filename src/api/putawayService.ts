@@ -1,8 +1,15 @@
 // ============================================================
-// Put-Away Service — Generate, List, Complete Put-Away Items
+// Put-Away Service — Generate, List, Complete (QR-based dual-axis)
 // ============================================================
 import { coreClient } from './client';
-import type { PutAwayList, PutAwayItem, PaginatedResponse } from '../types';
+import type {
+  PutAwayList,
+  PutAwayItem,
+  PaginatedResponse,
+  TrackingItem,
+  CompletePutawayRequest,
+  CompletePutawayResponse,
+} from '../types';
 
 // ---------- Generate Put-Away List from Receiving Slip ----------
 export async function generatePutAwayFromSlip(
@@ -61,4 +68,46 @@ export async function skipPutAwayItem(
     reason ? { reason } : {}
   );
   return data;
+}
+
+// ================================================================
+// Dual-Axis: QR-based Put-Away (No slip/list context needed)
+// ================================================================
+
+// ---------- List items available for put-away ----------
+export async function getAvailableForPutaway(params?: {
+  warehouse_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PaginatedResponse<TrackingItem>> {
+  const { data } = await coreClient.get<PaginatedResponse<TrackingItem>>(
+    '/put-away/available',
+    { params, timeout: 10000 }
+  );
+  return data;
+}
+
+// ---------- Complete put-away by QR ----------
+export async function completePutawayByQr(
+  payload: CompletePutawayRequest
+): Promise<CompletePutawayResponse> {
+  const { data } = await coreClient.post<CompletePutawayResponse>(
+    '/put-away/complete',
+    payload,
+    { timeout: 10000 }
+  );
+  return data;
+}
+
+// ---------- Lookup tracking by QR ----------
+export async function lookupTrackingByQr(qr: string): Promise<TrackingItem | null> {
+  try {
+    const { data } = await coreClient.get<TrackingItem>(
+      `/put-away/lookup/${encodeURIComponent(qr)}`,
+      { timeout: 8000 }
+    );
+    return data;
+  } catch {
+    return null;
+  }
 }

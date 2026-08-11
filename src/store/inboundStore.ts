@@ -382,23 +382,69 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   rejectSlipItems: async (slipId: string) => {
     const slip = get().generatedSlip;
     const rejections = get().itemRejections;
-    if (!slip || !slip.items?.length) return;
+    if (!slip) {
+      console.warn('[rejectSlipItems] No slip available.');
+      return;
+    }
 
-    const itemsToReject = slip.items.filter((item) => {
-      const key = `${item.sku}||${item.batch_number}`;
+    // Extract items from groups (new format) or items (legacy format)
+    const allItems: { id: string; sku: string; batch_number: string | null }[] = [];
+    if (slip.groups && slip.groups.length > 0) {
+      for (const group of slip.groups) {
+        for (const item of group.items) {
+          allItems.push({ id: item.id, sku: item.sku, batch_number: item.batch_number });
+        }
+      }
+    } else if (slip.items && slip.items.length > 0) {
+      allItems.push(...slip.items.map(i => ({ id: i.id, sku: i.sku, batch_number: i.batch_number })));
+    }
+
+    if (allItems.length === 0) {
+      console.warn('[rejectSlipItems] No items found in slip (groups or items). Slip:', JSON.stringify(slip).substring(0, 200));
+      return;
+    }
+
+    console.log('[rejectSlipItems] Starting rejection for slip:', slipId);
+    console.log('[rejectSlipItems] Rejection keys:', Object.keys(rejections));
+    console.log('[rejectSlipItems] Slip items:', allItems.map(i => ({ id: i.id, sku: i.sku, batch: i.batch_number })));
+
+    const itemsToReject = allItems.filter((item) => {
+      const key = `${item.sku}||${item.batch_number || ''}`;
       return rejections[key]?.rejected;
     });
 
+    console.log('[rejectSlipItems] Items to reject:', itemsToReject.length, 'out of', allItems.length);
+
+    if (itemsToReject.length === 0) {
+      console.warn('[rejectSlipItems] No items matched rejection keys. Keys:', Object.keys(rejections));
+      // Try matching by serial number (from qseal-child keys)
+      const childKeys = Object.entries(rejections).filter(([k, v]) => k.startsWith('qseal-child||') && v.rejected);
+      console.warn('[rejectSlipItems] Child rejection keys found:', childKeys.length);
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
     for (const item of itemsToReject) {
-      const key = `${item.sku}||${item.batch_number}`;
+      const key = `${item.sku}||${item.batch_number || ''}`;
       const rejection = rejections[key];
       try {
+        console.log('[rejectSlipItems] Rejecting item:', { itemId: item.id, sku: item.sku, batch: item.batch_number, reason: rejection?.reason });
         await inboundService.rejectSlipItem(slipId, item.id, {
           reason: rejection?.reason || 'Rejected during review',
         });
+        successCount++;
+        console.log('[rejectSlipItems] Rejected OK:', item.id);
       } catch (err: any) {
-        console.error(`Failed to reject item ${item.id}:`, err?.response?.data || err?.message);
+        failCount++;
+        console.error(`[rejectSlipItems] FAILED to reject item ${item.id}:`, {
+          status: err?.response?.status,
+          data: err?.response?.data,
+          message: err?.message,
+        });
       }
     }
+
+    console.log('[rejectSlipItems] Done:', { successCount, failCount, total: itemsToReject.length });
   },
 }));
