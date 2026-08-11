@@ -34,7 +34,8 @@ export async function recordScan(
 ): Promise<ScanRecord> {
   const { data } = await coreClient.post<ScanRecord>(
     `/inbound/sessions/${sessionId}/scan`,
-    payload
+    payload,
+    { timeout: 10000 }
   );
   return data;
 }

@@ -243,10 +243,8 @@ export default function InboundScreen({ navigation }: any) {
     }
   };
 
-  // ---- QSeal parent scan: Step 1→2→3 ----
+  // ---- QSeal parent scan: Step 1→2 (UI visible), Step 3 (background) ----
   const handleQSealScan = async (serial: string) => {
-    console.log('[Inbound] QSeal scan started, serial:', serial, 'orgId:', orgId);
-
     if (!orgId) {
       Alert.alert('Error', 'Organization ID not found. Please log out and log in again.');
       return;
@@ -255,60 +253,47 @@ export default function InboundScreen({ navigation }: any) {
     setIsProcessingQSeal(true);
     try {
       // Step 1: Resolve serial → get parent UUID
-      console.log('[Inbound] Step 1: POST /qseal/scan', { serial_number: serial, orgId });
       const node = await qsealService.scanQSeal(orgId, {
         serial_number: serial,
         device_type: 'mobile',
         os: 'iOS/Android',
         ip_address: '',
       });
-      console.log('[Inbound] Step 1 OK: node_id:', node.node_id, 'type:', node.qseal_type);
 
-      // Step 2: Fetch linked units (appends to the list)
-      console.log('[Inbound] Step 2: GET /qseal/parents/', node.node_id, '/linked-units');
+      // Step 2: Fetch linked units
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
-      console.log('[Inbound] Step 2 OK: linked_units count:', parentWithUnits.linked_units?.length || 0);
-      // Add to store for display
+
+      // Update store & UI immediately — don't wait for Step 3
       useInboundStore.setState((s) => ({
         linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
       }));
 
-      // Step 3: Record each linked unit's product_item_url as a scan
-      const units = parentWithUnits.linked_units || [];
-      if (units.length > 0) {
-        let scannedCount = 0;
-        for (const unit of units) {
-          const url = unit.product_item_url || unit.serial_number;
-          console.log('[Inbound] Step 3: recordScan linked unit:', {
-            serial: unit.serial_number,
-            url: url?.substring(0, 80),
-          });
-          try {
-            await recordScan(url);
-            scannedCount++;
-            console.log('[Inbound] Step 3 OK:', unit.serial_number);
-          } catch (err: any) {
-            console.log('[Inbound] Step 3 FAILED:', {
-              serial: unit.serial_number,
-              status: err?.response?.status,
-              data: JSON.stringify(err?.response?.data),
-            });
-          }
-        }
-        console.log('[Inbound] Step 3 done:', scannedCount, '/', units.length, 'recorded');
-        // QSeal info shown in the compact count bar — no popup needed
+      const unitCount = parentWithUnits.linked_units?.length || 0;
+      setIsProcessingQSeal(false); // 👈 Unblock UI immediately
+
+      // Step 3: Record individual scans in the BACKGROUND
+      if (unitCount > 0) {
+        recordScansInBackground(parentWithUnits.linked_units!);
       }
     } catch (err: any) {
-      console.log('[Inbound] QSeal scan FAILED:', {
-        status: err?.response?.status,
-        data: JSON.stringify(err?.response?.data),
-        message: err?.message,
-      });
       const detail = err?.response?.data?.detail || err?.message || '';
       const msg = typeof detail === 'string' ? detail : (detail?.message || 'Failed to process QSeal.');
       Alert.alert('QSeal Error', msg);
-    } finally {
       setIsProcessingQSeal(false);
+    }
+  };
+
+  // Background: record individual item scans concurrently
+  const recordScansInBackground = async (units: any[]) => {
+    const CONCURRENCY = 5;
+    for (let i = 0; i < units.length; i += CONCURRENCY) {
+      const batch = units.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(
+        batch.map(async (unit) => {
+          const url = unit.product_item_url || unit.serial_number;
+          try { await recordScan(url); } catch {}
+        })
+      );
     }
   };
 
