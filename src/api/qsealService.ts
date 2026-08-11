@@ -18,7 +18,8 @@ export async function scanQSeal(
 ): Promise<QSealNode> {
   const { data } = await coreClient.post<QSealNode>(
     `/qseal/scan?organization_id=${organizationId}`,
-    payload
+    payload,
+    { timeout: 15000 }
   );
   return data;
 }
@@ -72,7 +73,8 @@ export async function getQSealHistory(params?: {
 // ---------- Get Linked Units for a Parent QSeal ----------
 export async function getLinkedUnits(parentId: string): Promise<QSealParentWithUnits> {
   const { data } = await coreClient.get<QSealParentWithUnits>(
-    `/qseal/parents/${parentId}/linked-units`
+    `/qseal/parents/${parentId}/linked-units`,
+    { timeout: 15000 }
   );
   return data;
 }

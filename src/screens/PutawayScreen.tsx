@@ -7,19 +7,25 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   FlatList,
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import * as putawayService from '../api/putawayService';
+import QrScanner from '../components/QrScanner';
 import type { PutAwayList, PutAwayItem } from '../types';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type ViewMode = 'list' | 'detail';
 
 export default function PutawayScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { selectedWarehouse, worker } = useAuthStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -29,6 +35,17 @@ export default function PutawayScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // QR scanning states
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [scanMode, setScanMode] = useState<'item' | 'bin'>('item');
+  const [scannedItem, setScannedItem] = useState<PutAwayItem | null>(null);
+  const [overrideBinId, setOverrideBinId] = useState<string | null>(null);
+
+  // Skip reason input
+  const [skipModalVisible, setSkipModalVisible] = useState(false);
+  const [skipTarget, setSkipTarget] = useState<PutAwayItem | null>(null);
+  const [skipReason, setSkipReason] = useState('');
 
   // ---------- Load Put-Away Lists ----------
   const loadLists = useCallback(async () => {
@@ -73,98 +90,137 @@ export default function PutawayScreen() {
   // ---------- Complete Item ----------
   const handleCompleteItem = (item: PutAwayItem) => {
     if (!selectedList) return;
+
+    const doComplete = async (binIdOverride?: string) => {
+      setCompletingId(item.id);
+      try {
+        const updated = await putawayService.completePutAwayItem(
+          selectedList.id,
+          item.id,
+          binIdOverride
+        );
+        setSelectedList((prev) => {
+          if (!prev) return null;
+          const newItems = prev.items.map((i) =>
+            i.id === item.id
+              ? { ...i, status: 'completed' as const, completed_at: updated.completed_at, bin_location_code: binIdOverride ? 'Scanned Bin' : i.bin_location_code }
+              : i
+          );
+          const allDone = newItems.every((i) => i.status === 'completed' || i.status === 'skipped');
+          return {
+            ...prev,
+            items: newItems,
+            completed_items: prev.completed_items + 1,
+            status: allDone ? ('completed' as const) : prev.status,
+          };
+        });
+        setOverrideBinId(null);
+        Alert.alert('Done', `Item ${item.sku} put away successfully.`);
+      } catch (err: any) {
+        Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
+      } finally {
+        setCompletingId(null);
+      }
+    };
+
     Alert.alert(
       'Confirm Put-Away',
-      `Put ${item.sku} (${item.quantity}) into bin ${item.bin_location_code}?`,
+      `Put ${item.item_name || item.sku} (Qty: ${item.quantity}) into ${item.bin_full_path || item.bin_location_code}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Confirm',
-          onPress: async () => {
-            setCompletingId(item.id);
-            try {
-              const updated = await putawayService.completePutAwayItem(
-                selectedList.id,
-                item.id
-              );
-              // Update local state
-              setSelectedList((prev) => {
-                if (!prev) return null;
-                const newItems = prev.items.map((i) =>
-                  i.id === item.id ? { ...i, status: 'completed' as const, completed_at: updated.completed_at } : i
-                );
-                const allDone = newItems.every((i) => i.status === 'completed');
-                return {
-                  ...prev,
-                  items: newItems,
-                  status: allDone ? 'completed' as const : prev.status,
-                };
-              });
-              Alert.alert('Done', `Item ${item.sku} put away successfully.`);
-            } catch (err: any) {
-              Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
-            } finally {
-              setCompletingId(null);
-            }
+          text: 'Scan Different Bin',
+          onPress: () => {
+            setScannedItem(item);
+            setScanMode('bin');
+            setScannerVisible(true);
           },
         },
+        { text: 'Confirm', onPress: () => doComplete(overrideBinId ?? undefined) },
       ]
     );
   };
 
-  // ---------- Skip Item ----------
-  const handleSkipItem = (item: PutAwayItem) => {
-    if (!selectedList) return;
-    Alert.prompt
-      ? Alert.prompt(
-          'Skip Item',
-          'Enter reason for skipping:',
-          async (reason) => {
-            try {
-              await putawayService.skipPutAwayItem(selectedList.id, item.id, reason || undefined);
-              setSelectedList((prev) => {
-                if (!prev) return null;
-                return {
-                  ...prev,
-                  items: prev.items.map((i) =>
-                    i.id === item.id ? { ...i, status: 'skipped' as const } : i
-                  ),
-                };
-              });
-            } catch (err: any) {
-              Alert.alert('Error', 'Failed to skip item.');
-            }
-          },
-          'plain-text',
-          'Bin full'
-        )
-      : Alert.alert(
-          'Skip Item',
-          'Are you sure you want to skip this item?',
+  // ---------- Handle QR Scan Result ----------
+  const handleQRScan = (data: string) => {
+    setScannerVisible(false);
+    if (scanMode === 'bin') {
+      // Bin QR scanned — use as override
+      setOverrideBinId(data);
+      if (scannedItem) {
+        const item = scannedItem;
+        Alert.alert(
+          'Bin Scanned',
+          `Bin: ${data}\n\nComplete put-away for ${item.item_name || item.sku}?`,
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'Cancel', style: 'cancel', onPress: () => setOverrideBinId(null) },
             {
-              text: 'Skip',
-              style: 'destructive',
+              text: 'Confirm',
               onPress: async () => {
+                if (!selectedList) return;
+                setCompletingId(item.id);
                 try {
-                  await putawayService.skipPutAwayItem(selectedList.id, item.id, 'Skipped by worker');
+                  await putawayService.completePutAwayItem(selectedList.id, item.id, data);
                   setSelectedList((prev) => {
                     if (!prev) return null;
+                    const newItems = prev.items.map((i) =>
+                      i.id === item.id
+                        ? { ...i, status: 'completed' as const, completed_at: new Date().toISOString(), bin_location_code: data }
+                        : i
+                    );
+                    const allDone = newItems.every((i) => i.status === 'completed' || i.status === 'skipped');
                     return {
                       ...prev,
-                      items: prev.items.map((i) =>
-                        i.id === item.id ? { ...i, status: 'skipped' as const } : i
-                      ),
+                      items: newItems,
+                      completed_items: prev.completed_items + 1,
+                      status: allDone ? ('completed' as const) : prev.status,
                     };
                   });
+                  Alert.alert('Done', `Item put away into bin ${data}.`);
                 } catch (err: any) {
-                  Alert.alert('Error', 'Failed to skip item.');
+                  Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
+                } finally {
+                  setCompletingId(null);
+                  setOverrideBinId(null);
+                  setScannedItem(null);
                 }
               },
             },
           ]
         );
+      }
+    }
+    // item scan mode — could be used to verify item QR in the future
+  };
+
+  // ---------- Skip Item ----------
+  const handleSkipItem = (item: PutAwayItem) => {
+    setSkipTarget(item);
+    setSkipReason('');
+    setSkipModalVisible(true);
+  };
+
+  const confirmSkip = async () => {
+    if (!selectedList || !skipTarget) return;
+    const reason = skipReason.trim() || 'Skipped by worker';
+    try {
+      await putawayService.skipPutAwayItem(selectedList.id, skipTarget.id, reason);
+      setSelectedList((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          items: prev.items.map((i) =>
+            i.id === skipTarget.id ? { ...i, status: 'skipped' as const } : i
+          ),
+        };
+      });
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to skip item.');
+    } finally {
+      setSkipModalVisible(false);
+      setSkipTarget(null);
+      setSkipReason('');
+    }
   };
 
   const handleBackToList = () => {
@@ -186,6 +242,21 @@ export default function PutawayScreen() {
           </Text>
         </View>
 
+        {/* Direct Put-Away button */}
+        <TouchableOpacity
+          style={styles.directPutawayButton}
+          onPress={() => navigation.navigate('DirectPutaway')}
+        >
+          <Text style={styles.directPutawayIcon}>📋</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.directPutawayTitle}>Start Direct Put-Away</Text>
+            <Text style={styles.directPutawaySubtitle}>
+              Scan items & assign bins manually (no pre-generated list needed)
+            </Text>
+          </View>
+          <Text style={styles.directPutawayArrow}>→</Text>
+        </TouchableOpacity>
+
         <FlatList
           data={lists}
           keyExtractor={(item) => item.id}
@@ -203,7 +274,7 @@ export default function PutawayScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const completed = item.completed_items ?? item.items?.filter((i: any) => i.status === 'completed').length ?? 0;
+            const completed = item.completed_items ?? 0;
             const total = item.total_items ?? item.items?.length ?? 0;
             const progress = total > 0 ? completed / total : 0;
 
@@ -253,11 +324,54 @@ export default function PutawayScreen() {
 
   // ============ RENDER: DETAIL VIEW ============
   if (viewMode === 'detail' && selectedList) {
-    const completedCount = selectedList.items.filter((i) => i.status === 'completed').length;
+    const completedCount = selectedList.completed_items ?? selectedList.items.filter((i) => i.status === 'completed').length;
     const allDone = completedCount === selectedList.items.length;
 
     return (
       <View style={styles.container}>
+        {/* Skip reason modal */}
+        <Modal visible={skipModalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Skip Item</Text>
+              <Text style={styles.modalSubtitle}>
+                {skipTarget ? `${skipTarget.item_name || skipTarget.sku} — ${skipTarget.bin_full_path || skipTarget.bin_location_code}` : ''}
+              </Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Enter reason (e.g., Bin full, Damaged)"
+                placeholderTextColor="#667788"
+                value={skipReason}
+                onChangeText={setSkipReason}
+                multiline
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => { setSkipModalVisible(false); setSkipTarget(null); }}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirmButton} onPress={confirmSkip}>
+                  <Text style={styles.modalConfirmText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* QR Scanner overlay */}
+        {scannerVisible && (
+          <View style={StyleSheet.absoluteFill}>
+            <QrScanner
+              onScan={handleQRScan}
+              onClose={() => { setScannerVisible(false); setScannedItem(null); }}
+              title={scanMode === 'bin' ? 'Scan Bin QR' : 'Scan Item QR'}
+              subtitle={scanMode === 'bin' ? 'Scan the bin location QR code' : 'Scan item to confirm'}
+            />
+          </View>
+        )}
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleBackToList}>
@@ -268,6 +382,10 @@ export default function PutawayScreen() {
             {completedCount}/{selectedList.items.length} done
             {allDone && ' · ✅ COMPLETE'}
           </Text>
+          {/* Progress bar */}
+          <View style={styles.detailProgressBar}>
+            <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
+          </View>
         </View>
 
         {/* Warnings */}
@@ -284,17 +402,33 @@ export default function PutawayScreen() {
           data={selectedList.items}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.detailContent}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => {
+            const isCurrent = item.status === 'pending' && index === selectedList.items.findIndex(i => i.status === 'pending');
+            return (
             <View
               style={[
                 styles.itemCard,
                 item.status === 'completed' && styles.itemCardDone,
                 item.status === 'skipped' && styles.itemCardSkipped,
+                isCurrent && styles.itemCardCurrent,
               ]}
             >
+              {/* Route indicator */}
+              <View style={styles.routeRow}>
+                <View style={[styles.routeBadge, item.status === 'completed' && styles.routeBadgeDone, item.status === 'skipped' && styles.routeBadgeSkipped]}>
+                  <Text style={styles.routeBadgeText}>
+                    {item.status === 'completed' ? '✓' : item.status === 'skipped' ? '✗' : `#${item.sort_order}`}
+                  </Text>
+                </View>
+                <Text style={styles.routeLabel}>
+                  {item.status === 'completed' ? 'Done' : item.status === 'skipped' ? 'Skipped' : isCurrent ? '← NEXT STOP' : 'Upcoming'}
+                </Text>
+              </View>
+
               <View style={styles.itemHeader}>
-                <View>
-                  <Text style={styles.itemSku}>{item.sku}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemSku}>{item.item_name || item.sku}</Text>
+                  {item.item_name && <Text style={styles.itemSkuSub}>{item.sku}</Text>}
                   <Text style={styles.itemBatch}>Batch: {item.batch_number}</Text>
                 </View>
                 <View
@@ -315,11 +449,9 @@ export default function PutawayScreen() {
                 </View>
                 <View style={styles.itemDetailRow}>
                   <Text style={styles.itemDetailLabel}>Bin:</Text>
-                  <Text style={styles.itemBinCode}>{item.bin_location_code}</Text>
-                </View>
-                <View style={styles.itemDetailRow}>
-                  <Text style={styles.itemDetailLabel}>Order:</Text>
-                  <Text style={styles.itemDetailValue}>#{item.sort_order}</Text>
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={styles.itemBinCode}>{item.bin_full_path || item.bin_location_code}</Text>
+                  </View>
                 </View>
               </View>
 
@@ -339,6 +471,17 @@ export default function PutawayScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    style={styles.scanBinButton}
+                    onPress={() => {
+                      setScannedItem(item);
+                      setScanMode('bin');
+                      setScannerVisible(true);
+                    }}
+                  >
+                    <Text style={styles.scanBinButtonText}>📷 Bin</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
                     style={styles.skipButton}
                     onPress={() => handleSkipItem(item)}
                   >
@@ -352,8 +495,12 @@ export default function PutawayScreen() {
                   Completed: {new Date(item.completed_at).toLocaleString()}
                 </Text>
               )}
+              {item.status === 'skipped' && item.notes && (
+                <Text style={styles.skippedReason}>Reason: {item.notes}</Text>
+              )}
             </View>
-          )}
+          );
+          }}
         />
 
         {/* All done state */}
@@ -507,4 +654,104 @@ const styles = StyleSheet.create({
     borderColor: '#10B981',
   },
   allDoneText: { color: '#10B981', fontSize: 15, textAlign: 'center', fontWeight: '500' },
+
+  // Route / walking order
+  routeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  routeBadge: {
+    backgroundColor: '#1A73E8',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeBadgeDone: { backgroundColor: '#10B981' },
+  routeBadgeSkipped: { backgroundColor: '#EF4444' },
+  routeBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  routeLabel: { color: '#8899AA', fontSize: 12, fontWeight: '600' },
+  itemCardCurrent: { borderColor: '#1A73E8', borderWidth: 2 },
+  itemSkuSub: { color: '#667788', fontSize: 12, marginTop: 1 },
+
+  // Detail progress bar
+  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3, marginTop: 12 },
+  detailProgressFill: { height: 6, backgroundColor: '#1A73E8', borderRadius: 3 },
+
+  // Direct Put-Away button
+  directPutawayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A3A5C',
+    marginHorizontal: 24,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#2A4A6C',
+  },
+  directPutawayIcon: { fontSize: 28 },
+  directPutawayTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  directPutawaySubtitle: { color: '#60A5FA', fontSize: 12, marginTop: 2 },
+  directPutawayArrow: { color: '#60A5FA', fontSize: 22, fontWeight: '700' },
+
+  // Scan bin button
+  scanBinButton: {
+    flex: 1,
+    backgroundColor: '#1A3A5C',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  scanBinButtonText: { color: '#60A5FA', fontSize: 14, fontWeight: '500' },
+
+  // Skip reason
+  skippedReason: { color: '#EF4444', fontSize: 11, marginTop: 8 },
+
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#1A2332',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+  },
+  modalTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  modalSubtitle: { color: '#8899AA', fontSize: 14, marginBottom: 16 },
+  modalInput: {
+    backgroundColor: '#0F1923',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    color: '#fff',
+    fontSize: 14,
+    padding: 14,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  modalActions: { flexDirection: 'row', gap: 12 },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalCancelText: { color: '#9CA3AF', fontSize: 15, fontWeight: '500' },
+  modalConfirmButton: {
+    flex: 1,
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });

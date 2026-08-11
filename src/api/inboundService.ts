@@ -34,7 +34,8 @@ export async function recordScan(
 ): Promise<ScanRecord> {
   const { data } = await coreClient.post<ScanRecord>(
     `/inbound/sessions/${sessionId}/scan`,
-    payload
+    payload,
+    { timeout: 10000 }
   );
   return data;
 }
@@ -180,4 +181,28 @@ export async function resolveFloatingItem(
     `/inbound/floating-items/${itemId}/resolve`,
     payload
   );
+}
+
+// ---------- Get FIFO Bin Suggestions (Workflow B) ----------
+export async function getFifoBins(
+  slipId: string,
+  itemId: string
+): Promise<import('../types').FifoBinResponse> {
+  const { data } = await coreClient.get<import('../types').FifoBinResponse>(
+    `/inbound/receiving-slips/${slipId}/items/${itemId}/fifo-bins`
+  );
+  return data;
+}
+
+// ---------- Assign Bin to Slip Item (Workflow B) ----------
+export async function assignBinToSlipItem(
+  slipId: string,
+  itemId: string,
+  payload: import('../types').AssignBinRequest
+): Promise<import('../types').AssignBinResponse> {
+  const { data } = await coreClient.post<import('../types').AssignBinResponse>(
+    `/inbound/receiving-slips/${slipId}/items/${itemId}/assign-bin`,
+    payload
+  );
+  return data;
 }

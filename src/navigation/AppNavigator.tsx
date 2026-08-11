@@ -13,6 +13,7 @@ import QrLoginScreen from '../screens/QrLoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import InboundScreen from '../screens/InboundScreen';
 import PutawayScreen from '../screens/PutawayScreen';
+import DirectPutawayScreen from '../screens/DirectPutawayScreen';
 import AssignBinScreen from '../screens/AssignBinScreen';
 import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
 import QsealCascadeScreen from '../screens/QsealCascadeScreen';
@@ -35,6 +36,7 @@ export type AppTabsParamList = {
 export type RootStackParamList = {
   AppTabs: undefined;
   QsealCascade: undefined;
+  DirectPutaway: undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -158,6 +160,8 @@ export default function AppNavigator() {
           >
             <RootStack.Screen name="AppTabs" component={AppTabs} />
             <RootStack.Screen name="QsealCascade" component={QsealCascadeScreen} />
+            <RootStack.Screen name="DirectPutaway" component={DirectPutawayScreen}
+              options={{ presentation: 'modal' }} />
           </RootStack.Navigator>
         ) : (
           <AuthNavigator />
