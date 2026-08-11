@@ -62,3 +62,52 @@ export async function skipPutAwayItem(
   );
   return data;
 }
+
+// ── Parallel Workflow: Direct Put-Away (NEW) ──────────────────────────────
+
+/** Scanned items on dock, ready for put-away. */
+export interface AvailableItem {
+  qr_identifier: string;
+  sku: string;
+  item_id: string;
+  batch_number: string | null;
+  quantity: number;
+  receiving_status: string;
+  scanned_at: string;
+}
+
+export interface AvailableItemsResponse {
+  items: AvailableItem[];
+  total: number;
+}
+
+/** Items scanned but not yet binned. */
+export async function getAvailableItems(warehouseId: string): Promise<AvailableItemsResponse> {
+  const { data } = await coreClient.get<AvailableItemsResponse>(
+    `/put-away/available?warehouse_id=${warehouseId}`
+  );
+  return data;
+}
+
+/** Direct put-away result. */
+export interface DirectPutawayResult {
+  qr_identifier: string;
+  sku: string;
+  bin_location_id: string;
+  putaway_status: string;
+  receiving_status: string;
+  stock_entered: boolean;
+  putaway_at: string | null;
+}
+
+/** Worker B scans QR → puts directly in bin. No put-away list needed. */
+export async function directPutaway(
+  qrIdentifier: string,
+  binLocationId: string
+): Promise<DirectPutawayResult> {
+  const { data } = await coreClient.post<DirectPutawayResult>(
+    '/put-away/direct',
+    { qr_identifier: qrIdentifier, bin_location_id: binLocationId }
+  );
+  return data;
+}
