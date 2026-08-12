@@ -33,7 +33,6 @@ export function useDirectPutaway(orgId: string) {
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [scannedSerials, setScannedSerials] = useState<Set<string>>(new Set());
-  const [binId, setBinId] = useState('');
   const [isAssigning, setIsAssigning] = useState(false);
 
   const scanLockRef = useRef(false);
@@ -139,9 +138,9 @@ export function useDirectPutaway(orgId: string) {
   }, [orgId, scannedSerials]);
 
   // ── Assign row (box → all children, child → single) ──
-  const assignRow = async (row: TableRow, bid: string) => {
-    if (!bid.trim()) { Alert.alert('Error', 'Enter a bin ID first.'); return; }
-    const bin = bid.trim();
+  // locationId is the UUID from bin QR lookup
+  const assignRow = async (row: TableRow, locationId: string) => {
+    if (!locationId) { Alert.alert('Error', 'No bin location resolved.'); return; }
 
     if (row.type === 'box') {
       const boxKey = row.key;
@@ -157,26 +156,29 @@ export function useDirectPutaway(orgId: string) {
       let done = 0;
       for (const c of boxChildren) {
         try {
-          await putawayService.completePutawayByQr({ qr: c.serial, bin_id: bin as any, quantity: c.tracking!.quantity });
+          await putawayService.completePutawayByQr({
+            qr: c.serial, bin_id: locationId, quantity: c.tracking!.quantity,
+          });
           setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
           done++;
         } catch {}
       }
       setIsAssigning(false);
-      Alert.alert('Done', `${done}/${boxChildren.length} items → ${bin}`);
+      Alert.alert('Done', `${done}/${boxChildren.length} items assigned.`);
     } else {
       if (row.status !== 'pending' || !row.tracking) return;
       try {
-        await putawayService.completePutawayByQr({ qr: row.serial, bin_id: bin as any, quantity: row.tracking.quantity });
+        await putawayService.completePutawayByQr({
+          qr: row.serial, bin_id: locationId, quantity: row.tracking.quantity,
+        });
         setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
       } catch (err: any) { Alert.alert('Error', err.response?.data?.detail || 'Failed.'); }
     }
   };
 
-  // ── Assign all pending ──
-  const assignAll = async (bid?: string) => {
-    const bin = (bid || binId).trim();
-    if (!bin) { Alert.alert('Error', 'Enter or scan a bin ID first.'); return; }
+  // ── Assign all pending to a bin (locationId = UUID from bin lookup) ──
+  const assignAll = async (locationId: string) => {
+    if (!locationId) { Alert.alert('Error', 'No bin location resolved.'); return; }
     const pending = rows.filter((r) => r.status === 'pending' && r.tracking);
     if (pending.length === 0) { Alert.alert('Info', 'No pending items.'); return; }
 
@@ -184,13 +186,15 @@ export function useDirectPutaway(orgId: string) {
     let done = 0;
     for (const r of pending) {
       try {
-        await putawayService.completePutawayByQr({ qr: r.serial, bin_id: bin as any, quantity: r.tracking!.quantity });
+        await putawayService.completePutawayByQr({
+          qr: r.serial, bin_id: locationId, quantity: r.tracking!.quantity,
+        });
         setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
         done++;
       } catch {}
     }
     setIsAssigning(false);
-    Alert.alert('Done', `${done}/${pending.length} items → ${bin}`);
+    Alert.alert('Done', `${done}/${pending.length} items assigned.`);
   };
 
   // ── Toggle expand ──
@@ -207,13 +211,12 @@ export function useDirectPutaway(orgId: string) {
     setRows([]);
     setLastFeedback(null);
     setErrorMsg(null);
-    setBinId('');
   };
 
   return {
     // State
     step, setStep, rows, expandedBoxes, isProcessing, lastFeedback,
-    errorMsg, setErrorMsg, binId, setBinId, isAssigning,
+    errorMsg, setErrorMsg, isAssigning,
     // Counts
     boxCount, childCount, assignedCount, pendingCount,
     // Actions

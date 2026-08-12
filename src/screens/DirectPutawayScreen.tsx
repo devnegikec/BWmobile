@@ -6,7 +6,7 @@ import { View, StyleSheet } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useDirectPutaway } from '../hooks/useDirectPutaway';
 import { ScanningView } from '../components/putaway/ScanningView';
-import { AssignView } from '../components/putaway/AssignView';
+import AssignView from '../components/putaway/AssignView';
 
 export default function DirectPutawayScreen({ navigation }: any) {
   const { selectedWarehouse, user, worker } = useAuthStore();
@@ -14,7 +14,7 @@ export default function DirectPutawayScreen({ navigation }: any) {
 
   const {
     step, setStep, rows, expandedBoxes, isProcessing, lastFeedback,
-    errorMsg, setErrorMsg, binId, setBinId, isAssigning,
+    errorMsg, setErrorMsg, isAssigning,
     boxCount, childCount, assignedCount, pendingCount,
     handleScan, assignRow, assignAll, toggleExpand, clearAll,
   } = useDirectPutaway(orgId);
@@ -43,17 +43,13 @@ export default function DirectPutawayScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <AssignView
-        boxCount={boxCount}
-        childCount={childCount}
-        assignedCount={assignedCount}
-        binId={binId}
-        isAssigning={isAssigning}
         rows={rows}
         expandedBoxes={expandedBoxes}
-        onBinChange={setBinId}
+        isAssigning={isAssigning}
         onAssignAll={assignAll}
-        onToggleExpand={toggleExpand}
         onAssignRow={assignRow}
+        onToggleExpand={toggleExpand}
+        onScanQSeal={handleScan}
         onBack={() => setStep('scanning')}
       />
     </View>

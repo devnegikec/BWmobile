@@ -1,195 +1,249 @@
 // ============================================================
-// AssignView — Bin input + AssignAll (+scan) + AssignTable
+// AssignView — Bin input + Scanner overlay + AssignTable + Assign All
 // ============================================================
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Alert, Platform } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator,
+  Modal, StyleSheet,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import QrScanner from '../QrScanner';
+import { parseBinQR, lookupBinByQr, BinInfo } from './binScanner';
+import { isQSealUrl } from './qrHelpers';
 import { AssignTable } from './AssignTable';
 import type { TableRow } from '../../hooks/useDirectPutaway';
 
 interface Props {
-  boxCount: number;
-  childCount: number;
-  assignedCount: number;
-  binId: string;
-  isAssigning: boolean;
   rows: TableRow[];
   expandedBoxes: Set<string>;
-  onBinChange: (v: string) => void;
-  onAssignAll: (binId: string) => void;
+  isAssigning: boolean;
+  onAssignAll: (locationId: string) => void;
+  onAssignRow: (row: TableRow, locationId: string) => void;
   onToggleExpand: (key: string) => void;
-  onAssignRow: (row: TableRow, binId: string) => Promise<void>;
+  onScanQSeal: (data: string) => void;
   onBack: () => void;
 }
 
-export function AssignView({
-  boxCount, childCount, assignedCount,
-  binId, isAssigning, rows, expandedBoxes,
-  onBinChange, onAssignAll, onToggleExpand,
-  onAssignRow, onBack,
+export default function AssignView({
+  rows, expandedBoxes, isAssigning,
+  onAssignAll, onAssignRow, onToggleExpand, onScanQSeal, onBack,
 }: Props) {
-  const [scanningBin, setScanningBin] = useState(false);
+  const [binCode, setBinCode] = useState('');
+  const [resolvedBin, setResolvedBin] = useState<BinInfo | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [resolving, setResolving] = useState(false);
 
-  // ── Handle bin QR scan ──
-  const handleBinScan = (data: string) => {
-    setScanningBin(false);
-    const scanned = data.trim();
-    onBinChange(scanned); // Fill the bin input
-  };
-
-  // ── Handle Assign All with scanner ──
-  const handleAssignAllPress = () => {
-    const bid = binId.trim();
-    if (bid) {
-      onAssignAll(bid);
-    } else {
-      // Open scanner to scan bin QR
-      setScanningBin(true);
+  // ── Resolve bin code → UUID ──
+  const resolveBin = useCallback(async (code: string): Promise<BinInfo | null> => {
+    const parsed = parseBinQR(code);
+    if (!parsed) {
+      Alert.alert('Invalid Code', 'Scanned code is not a valid bin QR. Please scan a bin label.');
+      return null;
     }
-  };
-
-  // ── Handle row Assign ──
-  const handleAssign = (row: TableRow) => {
-    const bid = binId.trim();
-    if (bid) {
-      onAssignRow(row, bid);
-    } else {
-      Alert.alert('Bin Required', 'Enter or scan a bin ID first.');
+    if (parsed.location_id) {
+      setResolvedBin(parsed);
+      return parsed;
     }
-  };
-
-  // ── Handle row Scan Bin ──
-  const handleScanBinForRow = (row: TableRow) => {
-    // Open scanner, then assign to the row
-    setScanningBin(true);
-    // Store the row to assign after scan
-    (handleScanBinForRow as any)._pendingRow = row;
-  };
-
-  // ── Override bin scan to handle row-specific assignment ──
-  const onBinScanned = (data: string) => {
-    const scanned = data.trim();
-    const pendingRow = (handleScanBinForRow as any)._pendingRow as TableRow | undefined;
-    if (pendingRow) {
-      // Row-specific scan → assign directly
-      setScanningBin(false);
-      onAssignRow(pendingRow, scanned);
-      (handleScanBinForRow as any)._pendingRow = undefined;
-    } else {
-      // Assign All scan → fill bin input
-      setScanningBin(false);
-      onBinChange(scanned);
-      // Auto-trigger assign all with the scanned bin
-      setTimeout(() => onAssignAll(scanned), 300);
+    setResolving(true);
+    const info = await lookupBinByQr(parsed.qr_code);
+    setResolving(false);
+    if (!info) {
+      Alert.alert('Bin Not Found', `No warehouse location for code "${parsed.qr_code}".`);
+      return null;
     }
-  };
+    setResolvedBin(info);
+    return info;
+  }, []);
+
+  // ── Handle scanned data (bin QR or QSeal) ──
+  const handleScanned = useCallback((data: string) => {
+    setScanning(false);
+    if (isQSealUrl(data)) {
+      onScanQSeal(data);
+      return;
+    }
+    resolveBin(data);
+  }, [resolveBin, onScanQSeal]);
+
+  // ── Manual bin code entry ──
+  const handleManualSubmit = useCallback(async () => {
+    const code = binCode.trim();
+    if (!code) return;
+    setBinCode('');
+    await resolveBin(code);
+  }, [binCode, resolveBin]);
+
+  // ── Assign all ──
+  const handleAssignAll = useCallback(() => {
+    if (!resolvedBin?.location_id) {
+      Alert.alert('No Bin', 'Scan or enter a bin code first.');
+      return;
+    }
+    onAssignAll(resolvedBin.location_id);
+    setResolvedBin(null);
+  }, [resolvedBin, onAssignAll]);
+
+  // ── Assign single row ──
+  const handleAssignRow = useCallback((row: TableRow) => {
+    if (!resolvedBin?.location_id) {
+      Alert.alert('No Bin', 'Scan or enter a bin code first.');
+      return;
+    }
+    onAssignRow(row, resolvedBin.location_id);
+  }, [resolvedBin, onAssignRow]);
 
   return (
     <View style={styles.container}>
-      {/* Scanner overlay */}
-      {scanningBin && (
-        <View style={styles.scannerOverlay}>
-          <QrScanner
-            onScan={onBinScanned}
-            onClose={() => { setScanningBin(false); (handleScanBinForRow as any)._pendingRow = undefined; }}
-            title="Scan Bin QR"
-            subtitle="Scan the bin location QR code"
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Assign to Bin</Text>
+        <View style={{ width: 36 }} />
+      </View>
+
+      {/* ── Bin input row ── */}
+      <View style={styles.binRow}>
+        <View style={styles.binInputContainer}>
+          <Ionicons name="cube-outline" size={18} color="#9CA3AF" style={{ marginRight: 6 }} />
+          <TextInput
+            style={styles.binInput}
+            placeholder="Enter or scan bin code..."
+            placeholderTextColor="#6B7280"
+            value={binCode}
+            onChangeText={setBinCode}
+            onSubmitEditing={handleManualSubmit}
+            autoCapitalize="characters"
+            returnKeyType="go"
           />
+          <TouchableOpacity onPress={() => setScanning(true)} style={styles.scanBtn}>
+            <Ionicons name="qr-code-outline" size={20} color="#60A5FA" />
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.goBtn, !binCode.trim() && styles.goBtnDisabled]}
+          onPress={handleManualSubmit}
+          disabled={!binCode.trim()}
+        >
+          <Text style={styles.goBtnText}>Go</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Resolving spinner ── */}
+      {resolving && (
+        <View style={styles.resolvingRow}>
+          <ActivityIndicator size="small" color="#60A5FA" />
+          <Text style={styles.resolvingText}>Looking up bin...</Text>
         </View>
       )}
 
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backBtn}>← Scanning</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Assign to Bins</Text>
-        <Text style={styles.sub}>
-          {boxCount} boxes · {childCount} items · {assignedCount} done
-        </Text>
-      </View>
-
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {/* Bin input + Assign All */}
-        <View style={styles.binSection}>
-          <Text style={styles.binLabel}>BIN LOCATION</Text>
-          <View style={styles.binRow}>
-            <TextInput
-              style={styles.binInput}
-              placeholder="Enter or scan bin ID"
-              placeholderTextColor="#667788"
-              value={binId}
-              onChangeText={onBinChange}
-              autoCapitalize="characters"
-            />
-            <TouchableOpacity style={styles.scanBinBtn} onPress={() => setScanningBin(true)}>
-              <Text style={styles.scanBinBtnText}>📷</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.assignAllBtn, isAssigning && styles.assignAllBtnDisabled]}
-              onPress={handleAssignAllPress}
-              disabled={isAssigning}
-            >
-              {isAssigning ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.assignAllBtnText}>{binId.trim() ? 'Assign All' : 'Scan & Assign'}</Text>
-              )}
-            </TouchableOpacity>
+      {/* ── Resolved bin + Assign All ── */}
+      {resolvedBin && !resolving && (
+        <View style={styles.resolvedRow}>
+          <View style={styles.resolvedInfo}>
+            <Ionicons name="checkmark-circle" size={18} color="#34D399" />
+            <Text style={styles.resolvedPath} numberOfLines={1}>
+              {resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code}
+            </Text>
           </View>
+          <TouchableOpacity
+            style={[styles.assignAllBtn, isAssigning && styles.btnDisabled]}
+            onPress={handleAssignAll}
+            disabled={isAssigning}
+          >
+            {isAssigning ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="download-outline" size={16} color="#fff" />
+                <Text style={styles.assignAllText}>Assign All</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
+      )}
 
-        {/* Table */}
-        <AssignTable
-          rows={rows}
-          expandedBoxes={expandedBoxes}
-          onToggleExpand={onToggleExpand}
-          onAssign={handleAssign}
-          onScanBin={handleScanBinForRow}
-        />
-      </ScrollView>
+      {/* ── Table ── */}
+      <AssignTable
+        rows={rows}
+        expandedBoxes={expandedBoxes}
+        onToggleExpand={onToggleExpand}
+        onAssign={handleAssignRow}
+        onScanBin={(row) => {
+          if (row.serial) {
+            setScanning(true);
+            // Will scan QSeal from within scanner
+          }
+        }}
+      />
 
-      {/* Back to scan */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.resumeBtn} onPress={onBack}>
-          <Text style={styles.resumeBtnText}>Resume Scanning</Text>
-        </TouchableOpacity>
-      </View>
+      {/* ── Scanner modal ── */}
+      <Modal visible={scanning} animationType="slide" presentationStyle="fullScreen">
+        <View style={styles.scannerContainer}>
+          <QrScanner
+            onScan={handleScanned}
+            onClose={() => setScanning(false)}
+          />
+          <TouchableOpacity
+            style={styles.scannerCloseBtn}
+            onPress={() => setScanning(false)}
+          >
+            <Ionicons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F1923' },
-  scannerOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, backgroundColor: '#0F1923' },
-  header: { paddingTop: 55, paddingBottom: 16, paddingHorizontal: 16, backgroundColor: '#1A2332', borderBottomWidth: 1, borderBottomColor: '#2A3A4A' },
-  backBtn: { color: '#1A73E8', fontSize: 15, fontWeight: '600', marginBottom: 8 },
-  title: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  sub: { color: '#8899AA', fontSize: 13, marginTop: 4 },
-
-  scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-
-  binSection: { marginBottom: 16 },
-  binLabel: { color: '#667788', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
-  binRow: { flexDirection: 'row', gap: 8 },
-  binInput: {
-    flex: 1, backgroundColor: '#1A2332', borderRadius: 10, borderWidth: 1, borderColor: '#2A3A4A',
-    color: '#fff', fontSize: 16, paddingHorizontal: 14, paddingVertical: 12,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16,
   },
-  scanBinBtn: {
-    backgroundColor: '#1A3A5C', borderRadius: 10, width: 48, alignItems: 'center', justifyContent: 'center',
-  },
-  scanBinBtnText: { fontSize: 22 },
-  assignAllBtn: { backgroundColor: '#10B981', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
-  assignAllBtnDisabled: { backgroundColor: '#374151' },
-  assignAllBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  backBtn: { padding: 6 },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
 
-  footer: { flexDirection: 'row', padding: 16, gap: 10 },
-  resumeBtn: {
-    flex: 1, backgroundColor: '#1A2332', borderRadius: 10, paddingVertical: 14,
-    alignItems: 'center', borderWidth: 1, borderColor: '#2A3A4A',
+  binRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#1F2937', borderRadius: 12, margin: 16, marginTop: 0,
+    padding: 4, paddingLeft: 12,
   },
-  resumeBtnText: { color: '#B0C4D8', fontSize: 15, fontWeight: '600' },
+  binInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  binInput: { flex: 1, fontSize: 16, color: '#F9FAFB', paddingVertical: 10 },
+  scanBtn: { padding: 8 },
+  goBtn: {
+    backgroundColor: '#2563EB', borderRadius: 10,
+    paddingHorizontal: 18, paddingVertical: 10,
+  },
+  goBtnDisabled: { backgroundColor: '#1E3A5F' },
+  goBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+
+  resolvingRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginBottom: 8, padding: 8,
+  },
+  resolvingText: { color: '#9CA3AF', fontSize: 14 },
+
+  resolvedRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 16, marginBottom: 8,
+    backgroundColor: '#064E3B', borderRadius: 10, padding: 12,
+  },
+  resolvedInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  resolvedPath: { fontSize: 14, color: '#34D399', fontWeight: '500', flex: 1 },
+  assignAllBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
+  },
+  btnDisabled: { opacity: 0.5 },
+  assignAllText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+
+  scannerContainer: { flex: 1, backgroundColor: '#000' },
+  scannerCloseBtn: {
+    position: 'absolute', top: 50, right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 8,
+  },
 });
