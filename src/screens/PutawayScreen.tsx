@@ -19,6 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import * as putawayService from '../api/putawayService';
 import QrScanner from '../components/QrScanner';
+import ScreenContainer from '../components/ScreenContainer';
 import type { PutAwayList, PutAwayItem } from '../types';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
@@ -234,14 +235,10 @@ export default function PutawayScreen() {
     const pendingCount = lists.filter((l) => l.status === 'pending').length;
 
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Put-Away Lists</Text>
-          <Text style={styles.headerSubtitle}>
-            {pendingCount} pending · {selectedWarehouse?.name || ''}
-          </Text>
-        </View>
-
+      <ScreenContainer
+        title="Put-Away Lists"
+        subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`}
+      >
         {/* Direct Put-Away button */}
         <TouchableOpacity
           style={styles.directPutawayButton}
@@ -258,6 +255,7 @@ export default function PutawayScreen() {
         </TouchableOpacity>
 
         <FlatList
+          style={{ flex: 1 }}
           data={lists}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -318,7 +316,7 @@ export default function PutawayScreen() {
             );
           }}
         />
-      </View>
+      </ScreenContainer>
     );
   }
 
@@ -328,7 +326,7 @@ export default function PutawayScreen() {
     const allDone = completedCount === selectedList.items.length;
 
     return (
-      <View style={styles.container}>
+      <>
         {/* Skip reason modal */}
         <Modal visible={skipModalVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -360,33 +358,17 @@ export default function PutawayScreen() {
           </View>
         </Modal>
 
-        {/* QR Scanner overlay */}
-        {scannerVisible && (
-          <View style={StyleSheet.absoluteFill}>
-            <QrScanner
-              onScan={handleQRScan}
-              onClose={() => { setScannerVisible(false); setScannedItem(null); }}
-              title={scanMode === 'bin' ? 'Scan Bin QR' : 'Scan Item QR'}
-              subtitle={scanMode === 'bin' ? 'Scan the bin location QR code' : 'Scan item to confirm'}
-            />
-          </View>
-        )}
-
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBackToList}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{selectedList.put_away_list_no}</Text>
-          <Text style={styles.headerSubtitle}>
-            {completedCount}/{selectedList.items.length} done
-            {allDone && ' · ✅ COMPLETE'}
-          </Text>
+        <ScreenContainer
+          title={selectedList.put_away_list_no}
+          subtitle={`${completedCount}/${selectedList.items.length} done${allDone ? ' · ✅ COMPLETE' : ''}`}
+          onBack={handleBackToList}
+        >
           {/* Progress bar */}
-          <View style={styles.detailProgressBar}>
-            <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
+          <View style={styles.detailProgressBarWrap}>
+            <View style={styles.detailProgressBar}>
+              <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
+            </View>
           </View>
-        </View>
 
         {/* Warnings */}
         {selectedList.warnings && selectedList.warnings.length > 0 && (
@@ -399,6 +381,7 @@ export default function PutawayScreen() {
 
         {/* Items */}
         <FlatList
+          style={{ flex: 1 }}
           data={selectedList.items}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.detailContent}
@@ -511,7 +494,20 @@ export default function PutawayScreen() {
             </Text>
           </View>
         )}
-      </View>
+        </ScreenContainer>
+
+        {/* QR Scanner overlay (full-screen, on top) */}
+        {scannerVisible && (
+          <View style={StyleSheet.absoluteFill}>
+            <QrScanner
+              onScan={handleQRScan}
+              onClose={() => { setScannerVisible(false); setScannedItem(null); }}
+              title={scanMode === 'bin' ? 'Scan Bin QR' : 'Scan Item QR'}
+              subtitle={scanMode === 'bin' ? 'Scan the bin location QR code' : 'Scan item to confirm'}
+            />
+          </View>
+        )}
+      </>
     );
   }
 
@@ -521,17 +517,6 @@ export default function PutawayScreen() {
 // ============ STYLES ============
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F1923' },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 24,
-    backgroundColor: '#1A2332',
-  },
-  headerTitle: { color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 8 },
-  headerSubtitle: { color: '#8899AA', fontSize: 14, marginTop: 4 },
-  backButton: { color: '#1A73E8', fontSize: 16, fontWeight: '600' },
-
   // List
   listContent: { padding: 24, paddingBottom: 40 },
   listCard: {
@@ -673,7 +658,8 @@ const styles = StyleSheet.create({
   itemSkuSub: { color: '#667788', fontSize: 12, marginTop: 1 },
 
   // Detail progress bar
-  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3, marginTop: 12 },
+  detailProgressBarWrap: { paddingHorizontal: 24, marginTop: 12, marginBottom: 4 },
+  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3 },
   detailProgressFill: { height: 6, backgroundColor: '#1A73E8', borderRadius: 3 },
 
   // Direct Put-Away button
@@ -682,6 +668,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1A3A5C',
     marginHorizontal: 24,
+    marginTop: 16,
     borderRadius: 12,
     padding: 16,
     gap: 12,
