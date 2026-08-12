@@ -45,6 +45,7 @@ export default function InboundScreen() {
         onScan={flow.handleScan}
         onViewSummary={flow.handleViewSummary}
         onEndSession={flow.handleEndSession}
+        onCancel={flow.handleCancelSession}
       />
     );
   }

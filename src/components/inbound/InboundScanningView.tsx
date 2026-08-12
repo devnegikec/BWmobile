@@ -15,6 +15,7 @@ interface Props {
   onScan: (data: string) => void;
   onViewSummary: () => void;
   onEndSession: () => void;
+  onCancel: () => void;
 }
 
 export default function InboundScanningView({
@@ -26,11 +27,19 @@ export default function InboundScanningView({
   onScan,
   onViewSummary,
   onEndSession,
+  onCancel,
 }: Props) {
   return (
     <View style={styles.container}>
       {/* Session info bar */}
       <View style={styles.sessionBar}>
+        <TouchableOpacity
+          onPress={onCancel}
+          style={styles.backButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.backIcon}>‹</Text>
+        </TouchableOpacity>
         <View style={styles.sessionInfo}>
           <Text style={styles.sessionLabel}>Session Active</Text>
           <Text style={styles.sessionDock}>{session.dock_location}</Text>
@@ -104,7 +113,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 14,
   },
-  sessionInfo: {},
+  sessionInfo: {
+    flex: 1,
+  },
+  backButton: {
+    marginRight: 10,
+    paddingHorizontal: 4,
+  },
+  backIcon: {
+    color: '#B0C4D8',
+    fontSize: 28,
+    lineHeight: 28,
+  },
   sessionLabel: {
     color: '#1A73E8',
     fontSize: 12,

@@ -182,6 +182,14 @@ export function useInboundFlow() {
   };
 
   const handleEndSession = async () => {
+    // Do nothing if nothing was scanned — avoid creating empty receiving slips
+    const hasScans =
+      (currentSession?.total_boxes_scanned ?? 0) > 0 || linkedUnitsParents.length > 0;
+    if (!hasScans) {
+      Alert.alert('No Items Scanned', 'Nothing to end — no items have been scanned in this session.');
+      return;
+    }
+
     const rejectionCount = Object.values(itemRejections).filter((r) => r.rejected).length;
     const message =
       rejectionCount > 0
@@ -214,6 +222,28 @@ export function useInboundFlow() {
     setShowAsnPicker(false);
     setScannedQSealSerials(new Set());
     setStep('idle');
+  };
+
+  const handleCancelSession = () => {
+    Alert.alert(
+      'Cancel Session',
+      'Cancel this receiving session? Any scanned items will be discarded.',
+      [
+        { text: 'Keep Scanning', style: 'cancel' },
+        {
+          text: 'Cancel Session',
+          style: 'destructive',
+          onPress: () => {
+            clearSession();
+            clearLinkedUnits();
+            setDockLocation('');
+            setShowAsnPicker(false);
+            setScannedQSealSerials(new Set());
+            setStep('idle');
+          },
+        },
+      ]
+    );
   };
 
   const openAsnPicker = () => {
@@ -250,6 +280,7 @@ export function useInboundFlow() {
     handleViewSummary,
     handleEndSession,
     handleNewSession,
+    handleCancelSession,
     selectAsn,
     openAsnPicker,
   };
