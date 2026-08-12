@@ -35,6 +35,7 @@ export default function DirectPutawayScreen({ navigation }: any) {
           onClearError={() => setErrorMsg(null)}
           onViewAssign={() => setStep('assign')}
           onClear={clearAll}
+          onBack={() => navigation.goBack()}
         />
       </View>
     );

@@ -6,7 +6,6 @@ import {
   View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator,
   Modal, StyleSheet,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import QrScanner from '../QrScanner';
 import { parseBinQR, lookupBinByQr, BinInfo } from './binScanner';
 import { isQSealUrl } from './qrHelpers';
@@ -97,7 +96,7 @@ export default function AssignView({
       {/* ── Header ── */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Assign to Bin</Text>
         <View style={{ width: 36 }} />
@@ -106,7 +105,7 @@ export default function AssignView({
       {/* ── Bin input row ── */}
       <View style={styles.binRow}>
         <View style={styles.binInputContainer}>
-          <Ionicons name="cube-outline" size={18} color="#9CA3AF" style={{ marginRight: 6 }} />
+          <Text style={styles.cubeIcon}>📦</Text>
           <TextInput
             style={styles.binInput}
             placeholder="Enter or scan bin code..."
@@ -118,7 +117,7 @@ export default function AssignView({
             returnKeyType="go"
           />
           <TouchableOpacity onPress={() => setScanning(true)} style={styles.scanBtn}>
-            <Ionicons name="qr-code-outline" size={20} color="#60A5FA" />
+            <Text style={styles.scanIcon}>📷</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
@@ -142,7 +141,7 @@ export default function AssignView({
       {resolvedBin && !resolving && (
         <View style={styles.resolvedRow}>
           <View style={styles.resolvedInfo}>
-            <Ionicons name="checkmark-circle" size={18} color="#34D399" />
+            <Text style={styles.checkIcon}>✅</Text>
             <Text style={styles.resolvedPath} numberOfLines={1}>
               {resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code}
             </Text>
@@ -156,7 +155,7 @@ export default function AssignView({
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <>
-                <Ionicons name="download-outline" size={16} color="#fff" />
+                <Text style={styles.assignIcon}>📥</Text>
                 <Text style={styles.assignAllText}>Assign All</Text>
               </>
             )}
@@ -189,7 +188,7 @@ export default function AssignView({
             style={styles.scannerCloseBtn}
             onPress={() => setScanning(false)}
           >
-            <Ionicons name="close" size={24} color="#fff" />
+            <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -204,6 +203,7 @@ const styles = StyleSheet.create({
     paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16,
   },
   backBtn: { padding: 6 },
+  backIcon: { color: '#fff', fontSize: 28, lineHeight: 30 },
   headerTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
 
   binRow: {
@@ -212,8 +212,10 @@ const styles = StyleSheet.create({
     padding: 4, paddingLeft: 12,
   },
   binInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  cubeIcon: { marginRight: 6, fontSize: 16 },
   binInput: { flex: 1, fontSize: 16, color: '#F9FAFB', paddingVertical: 10 },
   scanBtn: { padding: 8 },
+  scanIcon: { fontSize: 18 },
   goBtn: {
     backgroundColor: '#2563EB', borderRadius: 10,
     paddingHorizontal: 18, paddingVertical: 10,
@@ -233,12 +235,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#064E3B', borderRadius: 10, padding: 12,
   },
   resolvedInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  checkIcon: { fontSize: 16 },
   resolvedPath: { fontSize: 14, color: '#34D399', fontWeight: '500', flex: 1 },
   assignAllBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
   },
   btnDisabled: { opacity: 0.5 },
+  assignIcon: { fontSize: 14 },
   assignAllText: { color: '#fff', fontWeight: '600', fontSize: 14 },
 
   scannerContainer: { flex: 1, backgroundColor: '#000' },
@@ -246,4 +250,5 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 50, right: 20,
     backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 8,
   },
+  closeIcon: { color: '#fff', fontSize: 24, lineHeight: 26 },
 });
