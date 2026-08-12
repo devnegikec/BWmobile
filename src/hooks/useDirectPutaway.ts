@@ -174,9 +174,9 @@ export function useDirectPutaway(orgId: string) {
   };
 
   // ── Assign all pending ──
-  const assignAll = async () => {
-    const bid = binId.trim();
-    if (!bid) { Alert.alert('Error', 'Enter a bin ID first.'); return; }
+  const assignAll = async (bid?: string) => {
+    const bin = (bid || binId).trim();
+    if (!bin) { Alert.alert('Error', 'Enter or scan a bin ID first.'); return; }
     const pending = rows.filter((r) => r.status === 'pending' && r.tracking);
     if (pending.length === 0) { Alert.alert('Info', 'No pending items.'); return; }
 
@@ -184,13 +184,13 @@ export function useDirectPutaway(orgId: string) {
     let done = 0;
     for (const r of pending) {
       try {
-        await putawayService.completePutawayByQr({ qr: r.serial, bin_id: bid as any, quantity: r.tracking!.quantity });
+        await putawayService.completePutawayByQr({ qr: r.serial, bin_id: bin as any, quantity: r.tracking!.quantity });
         setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
         done++;
       } catch {}
     }
     setIsAssigning(false);
-    Alert.alert('Done', `${done}/${pending.length} items → ${bid}`);
+    Alert.alert('Done', `${done}/${pending.length} items → ${bin}`);
   };
 
   // ── Toggle expand ──

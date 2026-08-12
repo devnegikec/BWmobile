@@ -10,9 +10,10 @@ interface Props {
   expandedBoxes: Set<string>;
   onToggleExpand: (key: string) => void;
   onAssign: (row: TableRow) => void;
+  onScanBin: (row: TableRow) => void;
 }
 
-export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign }: Props) {
+export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign, onScanBin }: Props) {
   // Filter visible rows: boxes always visible; children only if parent expanded
   const visibleRows = rows.filter((r, idx, arr) => {
     if (r.type === 'box') return true;
@@ -80,7 +81,7 @@ export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign }: P
 
             {/* Action */}
             <View style={[styles.cell, styles.colAction]}>
-              {renderAction(row, onAssign)}
+              {renderAction(row, onAssign, onScanBin)}
             </View>
           </TouchableOpacity>
         );
@@ -90,7 +91,11 @@ export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign }: P
 }
 
 /** Render the action cell based on item status */
-function renderAction(row: TableRow, onAssign: (row: TableRow) => void) {
+function renderAction(
+  row: TableRow,
+  onAssign: (row: TableRow) => void,
+  onScanBin: (row: TableRow) => void,
+) {
   if (row.status === 'assigned' || row.status === 'already-done') {
     return (
       <View style={[styles.badge, styles.badgeDone]}>
@@ -109,12 +114,25 @@ function renderAction(row: TableRow, onAssign: (row: TableRow) => void) {
     return <Text style={styles.naText}>—</Text>;
   }
 
-  // Show Assign on ALL pending rows (box + child)
-  const label = row.type === 'box' ? `Assign (${row.itemCount})` : 'Assign';
+  // Box row: single Assign button
+  if (row.type === 'box') {
+    return (
+      <TouchableOpacity style={styles.assignBtn} onPress={() => onAssign(row)}>
+        <Text style={styles.assignBtnText}>Assign ({row.itemCount})</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  // Child row: Assign + Scan buttons
   return (
-    <TouchableOpacity style={styles.assignBtn} onPress={() => onAssign(row)}>
-      <Text style={styles.assignBtnText}>{label}</Text>
-    </TouchableOpacity>
+    <View style={styles.actionRow}>
+      <TouchableOpacity style={styles.assignBtn} onPress={() => onAssign(row)}>
+        <Text style={styles.assignBtnText}>Assign</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.scanBtn} onPress={() => onScanBin(row)}>
+        <Text style={styles.scanBtnText}>📷</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -125,7 +143,7 @@ const styles = StyleSheet.create({
   colProduct: { flex: 5, minWidth: 0 },
   colBatch: { flex: 2, minWidth: 0 },
   colQty: { width: 40, alignItems: 'center' as const },
-  colAction: { width: 62, alignItems: 'flex-end' as const },
+  colAction: { width: 100, alignItems: 'flex-end' as const },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#0F1923' },
   rowChild: { backgroundColor: '#0F1923', paddingLeft: 6 },
@@ -140,6 +158,9 @@ const styles = StyleSheet.create({
 
   assignBtn: { backgroundColor: '#1A73E8', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   assignBtnText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  scanBtn: { backgroundColor: '#1A3A5C', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
+  scanBtnText: { fontSize: 14 },
+  actionRow: { flexDirection: 'row', gap: 4, alignItems: 'center' },
   badge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   badgeDone: { backgroundColor: '#10B981' },
   badgeRejected: { backgroundColor: '#EF4444' },
