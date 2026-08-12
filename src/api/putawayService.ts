@@ -1,8 +1,15 @@
 // ============================================================
-// Put-Away Service — Generate, List, Complete Put-Away Items
+// Put-Away Service — Generate, List, Complete (QR-based dual-axis)
 // ============================================================
 import { coreClient } from './client';
-import type { PutAwayList, PutAwayItem, PaginatedResponse } from '../types';
+import type {
+  PutAwayList,
+  PutAwayItem,
+  PaginatedResponse,
+  TrackingItem,
+  CompletePutawayRequest,
+  CompletePutawayResponse,
+} from '../types';
 
 // ---------- Generate Put-Away List from Receiving Slip ----------
 export async function generatePutAwayFromSlip(
@@ -63,51 +70,44 @@ export async function skipPutAwayItem(
   return data;
 }
 
-// ── Parallel Workflow: Direct Put-Away (NEW) ──────────────────────────────
+// ================================================================
+// Dual-Axis: QR-based Put-Away (No slip/list context needed)
+// ================================================================
 
-/** Scanned items on dock, ready for put-away. */
-export interface AvailableItem {
-  qr_identifier: string;
-  sku: string;
-  item_id: string;
-  batch_number: string | null;
-  quantity: number;
-  receiving_status: string;
-  scanned_at: string;
-}
-
-export interface AvailableItemsResponse {
-  items: AvailableItem[];
-  total: number;
-}
-
-/** Items scanned but not yet binned. */
-export async function getAvailableItems(warehouseId: string): Promise<AvailableItemsResponse> {
-  const { data } = await coreClient.get<AvailableItemsResponse>(
-    `/put-away/available?warehouse_id=${warehouseId}`
+// ---------- List items available for put-away ----------
+export async function getAvailableForPutaway(params?: {
+  warehouse_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PaginatedResponse<TrackingItem>> {
+  const { data } = await coreClient.get<PaginatedResponse<TrackingItem>>(
+    '/put-away/available',
+    { params, timeout: 10000 }
   );
   return data;
 }
 
-/** Direct put-away result. */
-export interface DirectPutawayResult {
-  qr_identifier: string;
-  sku: string;
-  bin_location_id: string;
-  putaway_status: string;
-  receiving_status: string;
-  stock_entered: boolean;
-  putaway_at: string | null;
-}
-
-/** Worker B scans QR → puts directly in bin. No put-away list needed. */
-export async function directPutaway(
-  qrIdentifier: string,
-  binLocationId: string
-): Promise<DirectPutawayResult> {
-  const { data } = await coreClient.post<DirectPutawayResult>(
-    '/put-away/direct',
-    { qr_identifier: qrIdentifier, bin_location_id: binLocationId }
+// ---------- Complete put-away by QR ----------
+export async function completePutawayByQr(
+  payload: CompletePutawayRequest
+): Promise<CompletePutawayResponse> {
+  const { data } = await coreClient.post<CompletePutawayResponse>(
+    '/put-away/complete',
+    payload,
+    { timeout: 10000 }
   );
   return data;
+}
+
+// ---------- Lookup tracking by QR ----------
+export async function lookupTrackingByQr(qr: string): Promise<TrackingItem | null> {
+  try {
+    const { data } = await coreClient.get<TrackingItem>(
+      `/put-away/lookup/${encodeURIComponent(qr)}`,
+      { timeout: 8000 }
+    );
+    return data;
+  } catch {
+    return null;
+  }
 }

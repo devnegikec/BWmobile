@@ -155,6 +155,8 @@ export default function InboundScreen({ navigation }: any) {
   const [showAsnPicker, setShowAsnPicker] = useState(false);
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  // Prevent duplicate QSeal scans
+  const [scannedQSealSerials, setScannedQSealSerials] = useState<Set<string>>(new Set());
 
   // Sync step with store state
   useEffect(() => {
@@ -250,6 +252,12 @@ export default function InboundScreen({ navigation }: any) {
       return;
     }
 
+    // Prevent duplicate QSeal scans
+    if (scannedQSealSerials.has(serial)) {
+      Alert.alert('Duplicate', `QSeal "${serial}" has already been scanned in this session.`);
+      return;
+    }
+
     setIsProcessingQSeal(true);
     try {
       // Step 1: Resolve serial → get parent UUID
@@ -269,7 +277,9 @@ export default function InboundScreen({ navigation }: any) {
       }));
 
       const unitCount = parentWithUnits.linked_units?.length || 0;
-      setIsProcessingQSeal(false); // 👈 Unblock UI immediately
+      setIsProcessingQSeal(false);
+      // Mark serial as scanned to prevent duplicates
+      setScannedQSealSerials((prev) => new Set(prev).add(serial)); // 👈 Unblock UI immediately
 
       // Step 3: Record individual scans in the BACKGROUND
       if (unitCount > 0) {
@@ -338,6 +348,7 @@ export default function InboundScreen({ navigation }: any) {
     setDockLocation('');
     setShowAsnPicker(false);
     setExpandedParents(new Set());
+    setScannedQSealSerials(new Set());
     setStep('idle');
   };
 
@@ -621,7 +632,9 @@ export default function InboundScreen({ navigation }: any) {
           type: 'qseal-child',
           productName: unit.serial_number,
           sku: unit.product_sku || '-',
-          batchNumber: unit.dispatch_batch || '-',
+          // Use serial_number for matching because the slip API
+          // returns batch_number = serial_number
+          batchNumber: unit.serial_number || unit.dispatch_batch || '-',
           boxCount: 1,
           itemCount: 1,
           rejectKey: childKey,
@@ -671,10 +684,13 @@ export default function InboundScreen({ navigation }: any) {
         rejectParent(row.rejectKey, reason);
       } else {
         toggleItemRejection(row.sku, row.batchNumber, true, reason);
+        // Also store by serial number (batchNumber = serial for child items)
+        const serialNumber = row.batchNumber; // Now equals serial_number
         useInboundStore.setState((s) => ({
           itemRejections: {
             ...s.itemRejections,
             [row.rejectKey]: { rejected: true, reason },
+            ...(serialNumber && serialNumber !== '-' ? { [serialNumber]: { rejected: true, reason } } : {}),
           },
         }));
       }
