@@ -2,7 +2,7 @@
 // AssignView — Bin input + AssignAll + AssignTable for Direct Put-Away
 // ============================================================
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Alert, Platform } from 'react-native';
 import { AssignTable } from './AssignTable';
 import type { TableRow } from '../../hooks/useDirectPutaway';
 
@@ -17,7 +17,7 @@ interface Props {
   onBinChange: (v: string) => void;
   onAssignAll: () => void;
   onToggleExpand: (key: string) => void;
-  onAssignSingle: (row: TableRow) => void;
+  onAssignRow: (row: TableRow, binId: string) => Promise<void>;
   onBack: () => void;
 }
 
@@ -25,8 +25,33 @@ export function AssignView({
   boxCount, childCount, assignedCount,
   binId, isAssigning, rows, expandedBoxes,
   onBinChange, onAssignAll, onToggleExpand,
-  onAssignSingle, onBack,
+  onAssignRow, onBack,
 }: Props) {
+  // When user taps Assign on a row, prompt for bin if not filled
+  const handleAssign = (row: TableRow) => {
+    const bid = binId.trim();
+    if (bid) {
+      // Use the global bin ID
+      onAssignRow(row, bid);
+    } else {
+      // Prompt for bin
+      Alert.prompt
+        ? Alert.prompt(
+            'Enter Bin ID',
+            row.type === 'box'
+              ? `Assign all ${row.itemCount} items from "${row.productName}" to bin:`
+              : `Assign "${row.productName}" to bin:`,
+            (text) => { if (text?.trim()) onAssignRow(row, text.trim()); },
+            'plain-text',
+            ''
+          )
+        : Alert.alert(
+            'Bin Required',
+            'Enter a bin ID at the top first, or tap "Assign All".',
+            [{ text: 'OK' }]
+          );
+    }
+  };
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -72,7 +97,7 @@ export function AssignView({
           rows={rows}
           expandedBoxes={expandedBoxes}
           onToggleExpand={onToggleExpand}
-          onAssign={onAssignSingle}
+          onAssign={handleAssign}
         />
       </ScrollView>
 

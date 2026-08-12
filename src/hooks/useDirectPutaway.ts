@@ -138,15 +138,39 @@ export function useDirectPutaway(orgId: string) {
     scanLockRef.current = false;
   }, [orgId, scannedSerials]);
 
-  // ── Assign single ──
-  const assignSingle = async (row: TableRow) => {
-    const bid = binId.trim();
-    if (!bid) { Alert.alert('Error', 'Enter a bin ID first.'); return; }
-    if (row.status !== 'pending' || !row.tracking) return;
-    try {
-      await putawayService.completePutawayByQr({ qr: row.serial, bin_id: bid as any, quantity: row.tracking.quantity });
-      setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
-    } catch (err: any) { Alert.alert('Error', err.response?.data?.detail || 'Failed.'); }
+  // ── Assign row (box → all children, child → single) ──
+  const assignRow = async (row: TableRow, bid: string) => {
+    if (!bid.trim()) { Alert.alert('Error', 'Enter a bin ID first.'); return; }
+    const bin = bid.trim();
+
+    if (row.type === 'box') {
+      const boxKey = row.key;
+      const boxIdx = rows.findIndex((r) => r.key === boxKey);
+      const after = rows.slice(boxIdx + 1);
+      const nextBoxIdx = after.findIndex((r) => r.type === 'box');
+      const boxChildren = (nextBoxIdx === -1 ? after : after.slice(0, nextBoxIdx))
+        .filter((r) => r.type === 'child' && r.status === 'pending' && r.tracking);
+
+      if (boxChildren.length === 0) { Alert.alert('Info', 'No pending items in this box.'); return; }
+
+      setIsAssigning(true);
+      let done = 0;
+      for (const c of boxChildren) {
+        try {
+          await putawayService.completePutawayByQr({ qr: c.serial, bin_id: bin as any, quantity: c.tracking!.quantity });
+          setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
+          done++;
+        } catch {}
+      }
+      setIsAssigning(false);
+      Alert.alert('Done', `${done}/${boxChildren.length} items → ${bin}`);
+    } else {
+      if (row.status !== 'pending' || !row.tracking) return;
+      try {
+        await putawayService.completePutawayByQr({ qr: row.serial, bin_id: bin as any, quantity: row.tracking.quantity });
+        setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
+      } catch (err: any) { Alert.alert('Error', err.response?.data?.detail || 'Failed.'); }
+    }
   };
 
   // ── Assign all pending ──
@@ -193,6 +217,6 @@ export function useDirectPutaway(orgId: string) {
     // Counts
     boxCount, childCount, assignedCount, pendingCount,
     // Actions
-    handleScan, assignSingle, assignAll, toggleExpand, clearAll,
+    handleScan, assignRow, assignAll, toggleExpand, clearAll,
   };
 }

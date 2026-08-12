@@ -108,11 +108,12 @@ function renderAction(row: TableRow, onAssign: (row: TableRow) => void) {
   if (row.status === 'not-found') {
     return <Text style={styles.naText}>—</Text>;
   }
-  if (row.type === 'box') return null;
 
+  // Show Assign on ALL pending rows (box + child)
+  const label = row.type === 'box' ? `Assign (${row.itemCount})` : 'Assign';
   return (
     <TouchableOpacity style={styles.assignBtn} onPress={() => onAssign(row)}>
-      <Text style={styles.assignBtnText}>Assign</Text>
+      <Text style={styles.assignBtnText}>{label}</Text>
     </TouchableOpacity>
   );
 }

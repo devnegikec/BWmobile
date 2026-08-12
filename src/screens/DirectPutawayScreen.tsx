@@ -16,7 +16,7 @@ export default function DirectPutawayScreen({ navigation }: any) {
     step, setStep, rows, expandedBoxes, isProcessing, lastFeedback,
     errorMsg, setErrorMsg, binId, setBinId, isAssigning,
     boxCount, childCount, assignedCount, pendingCount,
-    handleScan, assignSingle, assignAll, toggleExpand, clearAll,
+    handleScan, assignRow, assignAll, toggleExpand, clearAll,
   } = useDirectPutaway(orgId);
 
   if (step === 'scanning') {
@@ -53,7 +53,7 @@ export default function DirectPutawayScreen({ navigation }: any) {
         onBinChange={setBinId}
         onAssignAll={assignAll}
         onToggleExpand={toggleExpand}
-        onAssignSingle={assignSingle}
+        onAssignRow={assignRow}
         onBack={() => setStep('scanning')}
       />
     </View>
