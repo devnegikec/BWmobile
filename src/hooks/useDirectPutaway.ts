@@ -24,7 +24,7 @@ export interface TableRow {
 
 export type Step = 'scanning' | 'assign';
 
-export function useDirectPutaway(orgId: string) {
+export function useDirectPutaway(orgId: string, warehouseId: string) {
   // ── State ──
   const [step, setStep] = useState<Step>('scanning');
   const [rows, setRows] = useState<TableRow[]>([]);
@@ -34,6 +34,7 @@ export function useDirectPutaway(orgId: string) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [scannedSerials, setScannedSerials] = useState<Set<string>>(new Set());
   const [isAssigning, setIsAssigning] = useState(false);
+  const [directListId, setDirectListId] = useState<string | null>(null);
 
   const scanLockRef = useRef(false);
 
@@ -71,6 +72,19 @@ export function useDirectPutaway(orgId: string) {
         let tracking: TrackingItem | null = null;
         try {
           tracking = await putawayService.lookupTrackingByQr(unit.serial_number);
+          if (!tracking && warehouseId) {
+            // No inbound scan exists — create the tracking row on the fly
+            tracking = await putawayService.scanItemForPutaway({
+              qr: unit.product_item_url || unit.serial_number,
+              warehouse_id: warehouseId,
+            });
+          }
+          console.log(
+            '[DirectPutAway] lookup child', unit.serial_number, '->',
+            tracking
+              ? `putaway=${tracking.putaway_status} receiving=${tracking.receiving_status}`
+              : 'NOT FOUND'
+          );
           if (!tracking) status = 'not-found';
           else if (tracking.putaway_status === 'completed') status = 'already-done';
           else if (tracking.receiving_status === 'rejected') status = 'rejected';
@@ -96,12 +110,25 @@ export function useDirectPutaway(orgId: string) {
   };
 
   // ── Individual item scan ──
-  const processChild = async (serial: string) => {
+  const processChild = async (data: string, serial: string) => {
     setScannedSerials((prev) => new Set(prev).add(serial));
     let status: TableRow['status'] = 'not-found';
     let tracking: TrackingItem | null = null;
     try {
       tracking = await putawayService.lookupTrackingByQr(serial);
+      if (!tracking && warehouseId) {
+        // No inbound scan exists — create the tracking row on the fly
+        tracking = await putawayService.scanItemForPutaway({
+          qr: data,
+          warehouse_id: warehouseId,
+        });
+      }
+      console.log(
+        '[DirectPutAway] lookup item', serial, '->',
+        tracking
+          ? `putaway=${tracking.putaway_status} receiving=${tracking.receiving_status}`
+          : 'NOT FOUND'
+      );
       if (!tracking) status = 'not-found';
       else if (tracking.putaway_status === 'completed') status = 'already-done';
       else if (tracking.receiving_status === 'rejected') status = 'rejected';
@@ -132,15 +159,35 @@ export function useDirectPutaway(orgId: string) {
     }
 
     if (isQSealUrl(data) && orgId) await processParent(serial);
-    else await processChild(serial);
+    else await processChild(data, serial);
 
     scanLockRef.current = false;
-  }, [orgId, scannedSerials]);
+  }, [orgId, warehouseId, scannedSerials]);
+
+  // ── Ensure a direct put-away list exists for this session ──
+  const ensureDirectList = async (): Promise<string | null> => {
+    if (directListId) return directListId;
+    if (!warehouseId) return null;
+    try {
+      const list = await putawayService.createDirectPutAwayList(warehouseId);
+      setDirectListId(list.id);
+      console.log('[DirectPutAway] created put-away list', list.id);
+      return list.id;
+    } catch (err) {
+      console.log('[DirectPutAway] create put-away list FAILED', err);
+      return null;
+    }
+  };
 
   // ── Assign row (box → all children, child → single) ──
   // locationId is the UUID from bin QR lookup
   const assignRow = async (row: TableRow, locationId: string) => {
     if (!locationId) { Alert.alert('Error', 'No bin location resolved.'); return; }
+    console.log(
+      '[DirectPutAway] assignRow key=', row.key, 'type=', row.type,
+      'status=', row.status, 'bin=', locationId
+    );
+    const listId = await ensureDirectList();
 
     if (row.type === 'box') {
       const boxKey = row.key;
@@ -158,6 +205,7 @@ export function useDirectPutaway(orgId: string) {
         try {
           await putawayService.completePutawayByQr({
             qr: c.serial, bin_id: locationId, quantity: c.tracking!.quantity,
+            put_away_list_id: listId || undefined,
           });
           setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
           done++;
@@ -170,6 +218,7 @@ export function useDirectPutaway(orgId: string) {
       try {
         await putawayService.completePutawayByQr({
           qr: row.serial, bin_id: locationId, quantity: row.tracking.quantity,
+          put_away_list_id: listId || undefined,
         });
         setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
       } catch (err: any) { Alert.alert('Error', err.response?.data?.detail || 'Failed.'); }
@@ -179,8 +228,23 @@ export function useDirectPutaway(orgId: string) {
   // ── Assign all pending to a bin (locationId = UUID from bin lookup) ──
   const assignAll = async (locationId: string) => {
     if (!locationId) { Alert.alert('Error', 'No bin location resolved.'); return; }
+    console.log(
+      '[DirectPutAway] assignAll bin=', locationId,
+      'rows=', JSON.stringify(
+        rows.map((r) => ({
+          key: r.key,
+          type: r.type,
+          serial: r.serial,
+          status: r.status,
+          hasTracking: !!r.tracking,
+        }))
+      )
+    );
     const pending = rows.filter((r) => r.status === 'pending' && r.tracking);
+    console.log('[DirectPutAway] assignAll pendingCount=', pending.length);
     if (pending.length === 0) { Alert.alert('Info', 'No pending items.'); return; }
+
+    const listId = await ensureDirectList();
 
     setIsAssigning(true);
     let done = 0;
@@ -188,6 +252,7 @@ export function useDirectPutaway(orgId: string) {
       try {
         await putawayService.completePutawayByQr({
           qr: r.serial, bin_id: locationId, quantity: r.tracking!.quantity,
+          put_away_list_id: listId || undefined,
         });
         setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
         done++;
@@ -211,6 +276,7 @@ export function useDirectPutaway(orgId: string) {
     setRows([]);
     setLastFeedback(null);
     setErrorMsg(null);
+    setDirectListId(null);
   };
 
   return {

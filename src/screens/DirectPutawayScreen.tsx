@@ -17,7 +17,7 @@ export default function DirectPutawayScreen({ navigation }: any) {
     errorMsg, setErrorMsg, isAssigning,
     boxCount, childCount, assignedCount, pendingCount,
     handleScan, assignRow, assignAll, toggleExpand, clearAll,
-  } = useDirectPutaway(orgId);
+  } = useDirectPutaway(orgId, selectedWarehouse?.id || '');
 
   if (step === 'scanning') {
     return (

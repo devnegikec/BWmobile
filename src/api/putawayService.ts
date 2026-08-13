@@ -80,10 +80,12 @@ export async function getAvailableForPutaway(params?: {
   page?: number;
   page_size?: number;
 }): Promise<PaginatedResponse<TrackingItem>> {
+  console.log('[PutAway API] GET /put-away/available', JSON.stringify(params ?? {}));
   const { data } = await coreClient.get<PaginatedResponse<TrackingItem>>(
     '/put-away/available',
     { params, timeout: 10000 }
   );
+  console.log('[PutAway API] GET /put-away/available RESPONSE', JSON.stringify(data));
   return data;
 }
 
@@ -91,23 +93,63 @@ export async function getAvailableForPutaway(params?: {
 export async function completePutawayByQr(
   payload: CompletePutawayRequest
 ): Promise<CompletePutawayResponse> {
+  console.log('[PutAway API] POST /put-away/complete payload=', JSON.stringify(payload));
   const { data } = await coreClient.post<CompletePutawayResponse>(
     '/put-away/complete',
     payload,
     { timeout: 10000 }
   );
+  console.log('[PutAway API] POST /put-away/complete RESPONSE', JSON.stringify(data));
+  return data;
+}
+
+// ---------- Scan item for direct put-away (creates tracking row if missing) ----------
+export async function scanItemForPutaway(payload: {
+  qr: string;
+  warehouse_id: string;
+}): Promise<TrackingItem> {
+  console.log('[PutAway API] POST /put-away/scan payload=', JSON.stringify(payload));
+  const { data } = await coreClient.post<TrackingItem>('/put-away/scan', payload, {
+    timeout: 10000,
+  });
+  console.log('[PutAway API] POST /put-away/scan RESPONSE', JSON.stringify(data));
+  return data;
+}
+
+// ---------- Create a direct put-away list ----------
+export interface DirectPutAwayList {
+  id: string;
+  put_away_list_no: string;
+  status: string;
+}
+
+export async function createDirectPutAwayList(
+  warehouseId: string
+): Promise<DirectPutAwayList> {
+  console.log('[PutAway API] POST /put-away/lists warehouse_id=', warehouseId);
+  const { data } = await coreClient.post<DirectPutAwayList>(
+    '/put-away/lists',
+    { warehouse_id: warehouseId },
+    { timeout: 10000 }
+  );
+  console.log('[PutAway API] POST /put-away/lists RESPONSE', JSON.stringify(data));
   return data;
 }
 
 // ---------- Lookup tracking by QR ----------
 export async function lookupTrackingByQr(qr: string): Promise<TrackingItem | null> {
+  const url = `/put-away/lookup/${encodeURIComponent(qr)}`;
+  console.log('[PutAway API] GET', url);
   try {
-    const { data } = await coreClient.get<TrackingItem>(
-      `/put-away/lookup/${encodeURIComponent(qr)}`,
-      { timeout: 8000 }
-    );
+    const { data } = await coreClient.get<TrackingItem>(url, { timeout: 8000 });
+    console.log('[PutAway API] GET', url, 'RESPONSE', JSON.stringify(data));
     return data;
-  } catch {
+  } catch (err: any) {
+    console.log(
+      '[PutAway API] GET', url, 'ERROR',
+      err?.response?.status,
+      JSON.stringify(err?.response?.data ?? err?.message)
+    );
     return null;
   }
 }

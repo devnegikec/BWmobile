@@ -10,9 +10,10 @@ export function isQSealUrl(data: string): boolean {
 
 /**
  * Extract serial number from a QSeal URL, or null if not a QSeal URL.
- * Supports both URL patterns:
- *   Pattern A: /qseal/{SERIAL}   e.g. https://.../qseal/QSL5E248FC
- *   Pattern B: /s/{SERIAL}/...   e.g. https://.../g/SKU/s/JV9HKW/12345
+ * Supports URL patterns:
+ *   Pattern A: /qseal/{SERIAL}        e.g. https://.../qseal/QSL5E248FC
+ *   Pattern B: /s/{SERIAL}/...        e.g. https://.../g/SKU/s/JV9HKW/12345
+ *   Pattern C: /01/{gtin}/21/{serial} e.g. https://.../01/09520123456788/21/C00001234
  */
 export function extractQSealSerial(qrData: string): string | null {
   const trimmed = qrData.trim();
@@ -25,6 +26,12 @@ export function extractQSealSerial(qrData: string): string | null {
     const qsealIdx = pathParts.indexOf('qseal');
     if (qsealIdx !== -1 && qsealIdx + 1 < pathParts.length) {
       return pathParts[qsealIdx + 1];
+    }
+
+    // Pattern C: GS1 SGTIN /01/{gtin}/21/{serial}
+    const gs1Idx = pathParts.indexOf('21');
+    if (gs1Idx >= 2 && pathParts[gs1Idx - 2] === '01' && gs1Idx + 1 < pathParts.length) {
+      return pathParts[gs1Idx + 1];
     }
 
     // Pattern B: /s/{SERIAL}/...

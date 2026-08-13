@@ -267,6 +267,7 @@ export interface CompletePutawayRequest {
   qr: string;
   bin_id: string;
   quantity?: number;
+  put_away_list_id?: string;
 }
 
 export interface CompletePutawayResponse {
