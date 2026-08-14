@@ -47,6 +47,8 @@ export default function DirectPutawayScreen({ navigation }: any) {
         rows={rows}
         expandedBoxes={expandedBoxes}
         isAssigning={isAssigning}
+        assignedCount={assignedCount}
+        pendingCount={pendingCount}
         onAssignAll={assignAll}
         onAssignRow={assignRow}
         onToggleExpand={toggleExpand}

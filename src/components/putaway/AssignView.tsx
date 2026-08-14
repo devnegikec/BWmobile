@@ -4,7 +4,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator,
-  Modal, StyleSheet,
+  Modal, StyleSheet, ScrollView,
 } from 'react-native';
 import QrScanner from '../QrScanner';
 import { parseBinQR, lookupBinByQr, BinInfo } from './binScanner';
@@ -16,6 +16,8 @@ interface Props {
   rows: TableRow[];
   expandedBoxes: Set<string>;
   isAssigning: boolean;
+  assignedCount: number;
+  pendingCount: number;
   onAssignAll: (locationId: string) => void;
   onAssignRow: (row: TableRow, locationId: string) => void;
   onToggleExpand: (key: string) => void;
@@ -24,7 +26,7 @@ interface Props {
 }
 
 export default function AssignView({
-  rows, expandedBoxes, isAssigning,
+  rows, expandedBoxes, isAssigning, assignedCount, pendingCount,
   onAssignAll, onAssignRow, onToggleExpand, onScanQSeal, onBack,
 }: Props) {
   const [binCode, setBinCode] = useState('');
@@ -164,18 +166,33 @@ export default function AssignView({
       )}
 
       {/* ── Table ── */}
-      <AssignTable
-        rows={rows}
-        expandedBoxes={expandedBoxes}
-        onToggleExpand={onToggleExpand}
-        onAssign={handleAssignRow}
-        onScanBin={(row) => {
-          if (row.serial) {
-            setScanning(true);
-            // Will scan QSeal from within scanner
-          }
-        }}
-      />
+      <View style={styles.tableWrap}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 12 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <AssignTable
+            rows={rows}
+            expandedBoxes={expandedBoxes}
+            onToggleExpand={onToggleExpand}
+            onAssign={handleAssignRow}
+            onScanBin={(row) => {
+              if (row.serial) {
+                setScanning(true);
+                // Will scan QSeal from within scanner
+              }
+            }}
+          />
+        </ScrollView>
+      </View>
+
+      {/* ── Persistent footer ── */}
+      <View style={styles.footer}>
+        <Text style={styles.footerStat}>✅ {assignedCount} done</Text>
+        <View style={styles.footerDivider} />
+        <Text style={styles.footerStat}>⏳ {pendingCount} pending</Text>
+      </View>
 
       {/* ── Scanner modal ── */}
       <Modal visible={scanning} animationType="slide" presentationStyle="fullScreen">
@@ -237,6 +254,20 @@ const styles = StyleSheet.create({
   resolvedInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   checkIcon: { fontSize: 16 },
   resolvedPath: { fontSize: 14, color: '#34D399', fontWeight: '500', flex: 1 },
+  tableWrap: { flex: 1, paddingHorizontal: 16 },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#1A2332',
+    borderTopWidth: 1,
+    borderTopColor: '#2A3A4A',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  footerStat: { color: '#B0C4D8', fontSize: 14, fontWeight: '600' },
+  footerDivider: { width: 1, height: 16, backgroundColor: '#2A3A4A' },
   assignAllBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
