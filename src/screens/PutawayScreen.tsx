@@ -18,8 +18,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import * as putawayService from '../api/putawayService';
-import QrScanner from '../components/QrScanner';
-import { parseBinQR, lookupBinByQr, BinInfo } from '../components/putaway/binScanner';
+import AssignView from '../components/putaway/AssignView';
+import type { BinInfo } from '../components/putaway/binScanner';
 import type { PutAwayList, PutAwayItem } from '../types';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
@@ -63,13 +63,8 @@ export default function PutawayScreen() {
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Bin resolution (AssignView-style)
-  const [binCode, setBinCode] = useState('');
-  const [resolvedBin, setResolvedBin] = useState<BinInfo | null>(null);
-  const [resolving, setResolving] = useState(false);
   const [assigningAll, setAssigningAll] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [scannerVisible, setScannerVisible] = useState(false);
 
   // Skip reason input
   const [skipModalVisible, setSkipModalVisible] = useState(false);
@@ -116,40 +111,6 @@ export default function PutawayScreen() {
     }
   };
 
-  // ---------- Resolve bin (input or scan) ----------
-  const resolveBin = useCallback(async (code: string): Promise<BinInfo | null> => {
-    const parsed = parseBinQR(code);
-    if (!parsed) {
-      Alert.alert('Invalid Code', 'Scanned code is not a valid bin QR. Please scan a bin label.');
-      return null;
-    }
-    if (parsed.location_id) {
-      setResolvedBin(parsed);
-      return parsed;
-    }
-    setResolving(true);
-    const info = await lookupBinByQr(parsed.qr_code);
-    setResolving(false);
-    if (!info) {
-      Alert.alert('Bin Not Found', `No warehouse location for code "${parsed.qr_code}".`);
-      return null;
-    }
-    setResolvedBin(info);
-    return info;
-  }, []);
-
-  const handleBinScanned = useCallback((data: string) => {
-    setScannerVisible(false);
-    resolveBin(data);
-  }, [resolveBin]);
-
-  const handleManualBinSubmit = useCallback(async () => {
-    const code = binCode.trim();
-    if (!code) return;
-    setBinCode('');
-    await resolveBin(code);
-  }, [binCode, resolveBin]);
-
   // ---------- Mark items completed in local state ----------
   const markItemsCompleted = (completedIds: string[], binLabel: string) => {
     setSelectedList((prev) => {
@@ -173,16 +134,12 @@ export default function PutawayScreen() {
   };
 
   // ---------- Assign a single item ----------
-  const handleAssignItem = async (item: PutAwayItem) => {
+  const handleAssignItem = async (item: PutAwayItem, bin: BinInfo) => {
     if (!selectedList) return;
-    if (!resolvedBin?.location_id) {
-      Alert.alert('No Bin', 'Scan or enter a bin code first.');
-      return;
-    }
     setCompletingId(item.id);
     try {
-      await putawayService.completePutAwayItem(selectedList.id, item.id, resolvedBin.location_id);
-      markItemsCompleted([item.id], resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code);
+      await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
+      markItemsCompleted([item.id], bin.full_path || bin.location_code || bin.qr_code);
     } catch (err: any) {
       Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
     } finally {
@@ -191,33 +148,25 @@ export default function PutawayScreen() {
   };
 
   // ---------- Assign all pending items in a group ----------
-  const handleAssignGroup = async (group: PutAwayGroup) => {
+  const handleAssignGroup = async (group: PutAwayGroup, bin: BinInfo) => {
     if (!selectedList) return;
-    if (!resolvedBin?.location_id) {
-      Alert.alert('No Bin', 'Scan or enter a bin code first.');
-      return;
-    }
     const pending = group.children.filter((c) => c.status === 'pending');
     if (pending.length === 0) return;
     setAssigningAll(true);
     const completedIds: string[] = [];
     for (const item of pending) {
       try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, resolvedBin.location_id);
+        await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
         completedIds.push(item.id);
       } catch {}
     }
     setAssigningAll(false);
-    markItemsCompleted(completedIds, resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code);
+    markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
   };
 
   // ---------- Assign all pending items ----------
-  const handleAssignAll = async () => {
+  const handleAssignAll = async (locationId: string, binLabel: string) => {
     if (!selectedList) return;
-    if (!resolvedBin?.location_id) {
-      Alert.alert('No Bin', 'Scan or enter a bin code first.');
-      return;
-    }
     const pending = selectedList.items.filter((i) => i.status === 'pending');
     if (pending.length === 0) {
       Alert.alert('Info', 'No pending items.');
@@ -227,12 +176,12 @@ export default function PutawayScreen() {
     const completedIds: string[] = [];
     for (const item of pending) {
       try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, resolvedBin.location_id);
+        await putawayService.completePutAwayItem(selectedList.id, item.id, locationId);
         completedIds.push(item.id);
       } catch {}
     }
     setAssigningAll(false);
-    markItemsCompleted(completedIds, resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code);
+    markItemsCompleted(completedIds, binLabel);
     Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
   };
 
@@ -421,80 +370,23 @@ export default function PutawayScreen() {
           </View>
         </Modal>
 
-        <View style={styles.container}>
-          <Header
-            title={selectedList.put_away_list_no}
-            subtitle={`${completedCount}/${selectedList.items.length} done${allDone ? ' · ✅ COMPLETE' : ''}`}
-            onBack={handleBackToList}
-          />
-
-          {/* Bin input row (AssignView-style) */}
-          <View style={styles.binRow}>
-            <View style={styles.binInputContainer}>
-              <Text style={styles.cubeIcon}>📦</Text>
-              <TextInput
-                style={styles.binInput}
-                placeholder="Enter or scan bin code..."
-                placeholderTextColor="#6B7280"
-                value={binCode}
-                onChangeText={setBinCode}
-                onSubmitEditing={handleManualBinSubmit}
-                autoCapitalize="characters"
-                returnKeyType="go"
-              />
-              <TouchableOpacity onPress={() => setScannerVisible(true)} style={styles.scanBtn}>
-                <Text style={styles.scanIcon}>📷</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.goBtn, !binCode.trim() && styles.goBtnDisabled]}
-              onPress={handleManualBinSubmit}
-              disabled={!binCode.trim()}
-            >
-              <Text style={styles.goBtnText}>Go</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Resolving spinner */}
-          {resolving && (
-            <View style={styles.resolvingRow}>
-              <ActivityIndicator size="small" color="#60A5FA" />
-              <Text style={styles.resolvingText}>Looking up bin...</Text>
-            </View>
-          )}
-
-          {/* Resolved bin + Assign All */}
-          {resolvedBin && !resolving && (
-            <View style={styles.resolvedRow}>
-              <View style={styles.resolvedInfo}>
-                <Text style={styles.checkIcon}>✅</Text>
-                <Text style={styles.resolvedPath} numberOfLines={1}>
-                  {resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code}
-                </Text>
+        <AssignView
+          title={selectedList.put_away_list_no}
+          subtitle={`${completedCount}/${selectedList.items.length} done${allDone ? ' · ✅ COMPLETE' : ''}`}
+          isAssigning={assigningAll}
+          doneCount={completedCount}
+          pendingCount={selectedList.items.filter((i) => i.status === 'pending').length}
+          onAssignAll={(locationId, binLabel) => handleAssignAll(locationId, binLabel)}
+          onBack={handleBackToList}
+        >
+          {(ctx) => (
+            <View>
+              {/* Progress bar */}
+              <View style={styles.detailProgressBarWrap}>
+                <View style={styles.detailProgressBar}>
+                  <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
+                </View>
               </View>
-              <TouchableOpacity
-                style={[styles.assignAllBtn, assigningAll && styles.btnDisabled]}
-                onPress={handleAssignAll}
-                disabled={assigningAll}
-              >
-                {assigningAll ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Text style={styles.assignIcon}>📥</Text>
-                    <Text style={styles.assignAllText}>Assign All</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Progress bar */}
-          <View style={styles.detailProgressBarWrap}>
-            <View style={styles.detailProgressBar}>
-              <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
-            </View>
-          </View>
 
         {/* Warnings */}
         {selectedList.warnings && selectedList.warnings.length > 0 && (
@@ -505,27 +397,22 @@ export default function PutawayScreen() {
           </View>
         )}
 
-        {/* Table (AssignView-style, grouped) */}
-        <FlatList
-          style={{ flex: 1 }}
-          data={groups}
-          keyExtractor={(g) => g.key}
-          contentContainerStyle={styles.tableContent}
-          ListHeaderComponent={
-            <View style={styles.tableHeaders}>
-              <Text style={[styles.tableHeader, styles.colProduct]}>Product / SKU</Text>
-              <Text style={[styles.tableHeader, styles.colBatch]}>Batch</Text>
-              <Text style={[styles.tableHeader, styles.colQty]}>Qty</Text>
-              <Text style={[styles.tableHeader, styles.colAction]}>Action</Text>
-            </View>
-          }
-          renderItem={({ item: group }) => {
+              {/* Table header */}
+              <View style={styles.tableHeaders}>
+                <Text style={[styles.tableHeader, styles.colProduct]}>Product / SKU</Text>
+                <Text style={[styles.tableHeader, styles.colBatch]}>Batch</Text>
+                <Text style={[styles.tableHeader, styles.colQty]}>Qty</Text>
+                <Text style={[styles.tableHeader, styles.colAction]}>Action</Text>
+              </View>
+
+              {/* Grouped rows */}
+              {groups.map((group) => {
             const pendingChildren = group.children.filter((c) => c.status === 'pending');
             const groupDone = group.children.every((c) => c.status === 'completed' || c.status === 'skipped');
             const expanded = expandedGroups.has(group.key);
             const totalQty = pendingChildren.reduce((sum, c) => sum + c.quantity, 0);
             return (
-              <View>
+              <View key={group.key}>
                 {/* Group (box) row */}
                 <TouchableOpacity
                   style={styles.tableRow}
@@ -552,7 +439,10 @@ export default function PutawayScreen() {
                     ) : (
                       <TouchableOpacity
                         style={styles.assignBtn}
-                        onPress={() => handleAssignGroup(group)}
+                        onPress={() => {
+                          if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                          handleAssignGroup(group, ctx.bin);
+                        }}
                         disabled={assigningAll}
                       >
                         {assigningAll ? (
@@ -606,7 +496,10 @@ export default function PutawayScreen() {
                             <View style={styles.actionRow}>
                               <TouchableOpacity
                                 style={styles.assignBtn}
-                                onPress={() => handleAssignItem(child)}
+                                  onPress={() => {
+                                    if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                                    handleAssignItem(child, ctx.bin);
+                                  }}
                                 disabled={completingId === child.id}
                               >
                                 {completingId === child.id ? (
@@ -629,8 +522,7 @@ export default function PutawayScreen() {
                   })}
               </View>
             );
-          }}
-        />
+          })}
 
         {/* All done state */}
         {allDone && (
@@ -640,20 +532,9 @@ export default function PutawayScreen() {
             </Text>
           </View>
         )}
-        </View>
-
-        {/* Scanner modal (full-screen) */}
-        <Modal visible={scannerVisible} animationType="slide" presentationStyle="fullScreen">
-          <View style={styles.scannerContainer}>
-            <QrScanner onScan={handleBinScanned} onClose={() => setScannerVisible(false)} />
-            <TouchableOpacity
-              style={styles.scannerCloseBtn}
-              onPress={() => setScannerVisible(false)}
-            >
-              <Text style={styles.closeIcon}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        </Modal>
+            </View>
+          )}
+        </AssignView>
       </>
     );
   }

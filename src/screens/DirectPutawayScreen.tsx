@@ -6,6 +6,7 @@ import { View, StyleSheet } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useDirectPutaway } from '../hooks/useDirectPutaway';
 import { ScanningView } from '../components/putaway/ScanningView';
+import { AssignTable } from '../components/putaway/AssignTable';
 import AssignView from '../components/putaway/AssignView';
 
 export default function DirectPutawayScreen({ navigation }: any) {
@@ -44,17 +45,26 @@ export default function DirectPutawayScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <AssignView
-        rows={rows}
-        expandedBoxes={expandedBoxes}
+        title="Assign to Bin"
         isAssigning={isAssigning}
-        assignedCount={assignedCount}
+        doneCount={assignedCount}
         pendingCount={pendingCount}
         onAssignAll={assignAll}
-        onAssignRow={assignRow}
-        onToggleExpand={toggleExpand}
         onScanQSeal={handleScan}
         onBack={() => setStep('scanning')}
-      />
+      >
+        {(ctx) => (
+          <AssignTable
+            rows={rows}
+            expandedBoxes={expandedBoxes}
+            onToggleExpand={toggleExpand}
+            onAssign={(row) => assignRow(row, ctx.bin?.location_id || '')}
+            onScanBin={(row) => {
+              if (row.serial) ctx.openScanner();
+            }}
+          />
+        )}
+      </AssignView>
     </View>
   );
 }

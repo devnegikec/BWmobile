@@ -9,25 +9,27 @@ import {
 import QrScanner from '../QrScanner';
 import { parseBinQR, lookupBinByQr, BinInfo } from './binScanner';
 import { isQSealUrl } from './qrHelpers';
-import { AssignTable } from './AssignTable';
-import type { TableRow } from '../../hooks/useDirectPutaway';
+
+export interface AssignViewRenderContext {
+  bin: BinInfo | null;
+  openScanner: () => void;
+}
 
 interface Props {
-  rows: TableRow[];
-  expandedBoxes: Set<string>;
+  title: string;
+  subtitle?: string;
   isAssigning: boolean;
-  assignedCount: number;
+  doneCount: number;
   pendingCount: number;
-  onAssignAll: (locationId: string) => void;
-  onAssignRow: (row: TableRow, locationId: string) => void;
-  onToggleExpand: (key: string) => void;
-  onScanQSeal: (data: string) => void;
+  onAssignAll: (locationId: string, binLabel: string) => void;
+  onScanQSeal?: (data: string) => void;
   onBack: () => void;
+  children: (ctx: AssignViewRenderContext) => React.ReactNode;
 }
 
 export default function AssignView({
-  rows, expandedBoxes, isAssigning, assignedCount, pendingCount,
-  onAssignAll, onAssignRow, onToggleExpand, onScanQSeal, onBack,
+  title, subtitle, isAssigning, doneCount, pendingCount,
+  onAssignAll, onScanQSeal, onBack, children,
 }: Props) {
   const [binCode, setBinCode] = useState('');
   const [resolvedBin, setResolvedBin] = useState<BinInfo | null>(null);
@@ -59,7 +61,7 @@ export default function AssignView({
   // ── Handle scanned data (bin QR or QSeal) ──
   const handleScanned = useCallback((data: string) => {
     setScanning(false);
-    if (isQSealUrl(data)) {
+    if (onScanQSeal && isQSealUrl(data)) {
       onScanQSeal(data);
       return;
     }
@@ -80,18 +82,9 @@ export default function AssignView({
       Alert.alert('No Bin', 'Scan or enter a bin code first.');
       return;
     }
-    onAssignAll(resolvedBin.location_id);
+    onAssignAll(resolvedBin.location_id, resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code);
     setResolvedBin(null);
   }, [resolvedBin, onAssignAll]);
-
-  // ── Assign single row ──
-  const handleAssignRow = useCallback((row: TableRow) => {
-    if (!resolvedBin?.location_id) {
-      Alert.alert('No Bin', 'Scan or enter a bin code first.');
-      return;
-    }
-    onAssignRow(row, resolvedBin.location_id);
-  }, [resolvedBin, onAssignRow]);
 
   return (
     <View style={styles.container}>
@@ -100,7 +93,10 @@ export default function AssignView({
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Assign to Bin</Text>
+        <View style={styles.headerTextWrap}>
+          <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+          {subtitle ? <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        </View>
         <View style={{ width: 36 }} />
       </View>
 
@@ -165,31 +161,20 @@ export default function AssignView({
         </View>
       )}
 
-      {/* ── Table ── */}
+      {/* ── Table (provided by parent) ── */}
       <View style={styles.tableWrap}>
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: 12 }}
           keyboardShouldPersistTaps="handled"
         >
-          <AssignTable
-            rows={rows}
-            expandedBoxes={expandedBoxes}
-            onToggleExpand={onToggleExpand}
-            onAssign={handleAssignRow}
-            onScanBin={(row) => {
-              if (row.serial) {
-                setScanning(true);
-                // Will scan QSeal from within scanner
-              }
-            }}
-          />
+          {children({ bin: resolvedBin, openScanner: () => setScanning(true) })}
         </ScrollView>
       </View>
 
       {/* ── Persistent footer ── */}
       <View style={styles.footer}>
-        <Text style={styles.footerStat}>✅ {assignedCount} done</Text>
+        <Text style={styles.footerStat}>✅ {doneCount} done</Text>
         <View style={styles.footerDivider} />
         <Text style={styles.footerStat}>⏳ {pendingCount} pending</Text>
       </View>
@@ -221,7 +206,9 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 6 },
   backIcon: { color: '#fff', fontSize: 28, lineHeight: 30 },
-  headerTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#fff', textAlign: 'center' },
+  headerSubtitle: { fontSize: 12, color: '#8899AA', marginTop: 2, textAlign: 'center' },
+  headerTextWrap: { flex: 1, alignItems: 'center' },
 
   binRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
