@@ -159,6 +159,18 @@ export async function rejectSlipItem(
   return data;
 }
 
+// ---------- Bulk Update Slip Item Statuses ----------
+export async function updateSlipItemsStatus(
+  slipId: string,
+  items: { item_id: string; status: 'rejected' | 'ok' | 'short' | 'damaged'; reason?: string; notes?: string }[]
+): Promise<{ items: unknown[] }> {
+  const { data } = await coreClient.post<{ items: unknown[] }>(
+    `/inbound/receiving-slips/${slipId}/items/status`,
+    { items }
+  );
+  return data;
+}
+
 // ---------- Get Floating Items ----------
 export async function getFloatingItems(params?: {
   warehouse_id?: string;

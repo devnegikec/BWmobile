@@ -551,6 +551,14 @@ export interface RejectItemRequest {
   notes?: string;
 }
 
+// ---------- Bulk Item Status Update ----------
+export interface ItemStatusUpdate {
+  item_id: string;
+  status: 'rejected' | 'ok' | 'short' | 'damaged';
+  reason?: string;
+  notes?: string;
+}
+
 // ---------- Item Rejection State (local, for review step) ----------
 export interface ItemRejectionState {
   /** Maps "sku|batch_number" → rejection info */
