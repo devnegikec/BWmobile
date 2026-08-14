@@ -467,15 +467,8 @@ export default function PutawayScreen() {
                       >
                         <View style={[styles.tableCell, styles.colProduct]}>
                           <Text style={styles.tableChildName} numberOfLines={1}>
-                            · {child.item_name || group.name}
+                            {'   '}{child.batch_number || child.sku || group.name}
                           </Text>
-                          <Text style={styles.tableBin} numberOfLines={1}>📦 {child.bin_full_path || child.bin_location_code || '—'}</Text>
-                          {isDone && child.completed_at ? (
-                            <Text style={styles.tableMeta}>Done {new Date(child.completed_at).toLocaleString()}</Text>
-                          ) : null}
-                          {isSkipped && child.notes ? (
-                            <Text style={styles.tableMeta}>Reason: {child.notes}</Text>
-                          ) : null}
                         </View>
                         <View style={[styles.tableCell, styles.colBatch]}>
                           <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number || '—'}</Text>
@@ -496,10 +489,10 @@ export default function PutawayScreen() {
                             <View style={styles.actionRow}>
                               <TouchableOpacity
                                 style={styles.assignBtn}
-                                  onPress={() => {
-                                    if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
-                                    handleAssignItem(child, ctx.bin);
-                                  }}
+                                onPress={() => {
+                                  if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                                  handleAssignItem(child, ctx.bin);
+                                }}
                                 disabled={completingId === child.id}
                               >
                                 {completingId === child.id ? (
