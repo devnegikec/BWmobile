@@ -44,6 +44,19 @@ function extractSerial(data: string): { serial: string; isParent: boolean } | nu
       if (sIdx !== -1 && sIdx + 1 < pathParts.length) {
         return { serial: pathParts[sIdx + 1], isParent: false };
       }
+
+          // GS1 Digital Link SGTIN: /01/{gtin}/21/{serial} → treat as CHILD unit
+          const gs1Idx = pathParts.indexOf('21');
+          if (gs1Idx >= 1 && gs1Idx + 1 < pathParts.length) {
+            // check if '01' precedes the GTIN (two positions before '21')
+            if ((gs1Idx - 2) >= 0 && pathParts[gs1Idx - 2] === '01') {
+              return { serial: pathParts[gs1Idx + 1], isParent: false };
+            }
+            // also accept pattern where '01' is immediately before GTIN (older variations)
+            if (pathParts[gs1Idx - 1] && pathParts[gs1Idx - 1].length >= 8) {
+              return { serial: pathParts[gs1Idx + 1], isParent: false };
+            }
+          }
     } catch {}
     return null;
   }

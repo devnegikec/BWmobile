@@ -18,11 +18,38 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import * as putawayService from '../api/putawayService';
-import QrScanner from '../components/QrScanner';
+import AssignView from '../components/putaway/AssignView';
+import type { BinInfo } from '../components/putaway/binScanner';
 import type { PutAwayList, PutAwayItem } from '../types';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type ViewMode = 'list' | 'detail';
+
+interface PutAwayGroup {
+  key: string;
+  name: string;
+  sku: string;
+  children: PutAwayItem[];
+}
+
+function Header({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack?: () => void }) {
+  return (
+    <View style={styles.header}>
+      {onBack ? (
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={styles.backIcon}>‹</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.headerSpacer} />
+      )}
+      <View style={styles.headerTitleWrap}>
+        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+      </View>
+      <View style={styles.headerSpacer} />
+    </View>
+  );
+}
 
 export default function PutawayScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -36,11 +63,8 @@ export default function PutawayScreen() {
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // QR scanning states
-  const [scannerVisible, setScannerVisible] = useState(false);
-  const [scanMode, setScanMode] = useState<'item' | 'bin'>('item');
-  const [scannedItem, setScannedItem] = useState<PutAwayItem | null>(null);
-  const [overrideBinId, setOverrideBinId] = useState<string | null>(null);
+  const [assigningAll, setAssigningAll] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // Skip reason input
   const [skipModalVisible, setSkipModalVisible] = useState(false);
@@ -87,110 +111,87 @@ export default function PutawayScreen() {
     }
   };
 
-  // ---------- Complete Item ----------
-  const handleCompleteItem = (item: PutAwayItem) => {
-    if (!selectedList) return;
-
-    const doComplete = async (binIdOverride?: string) => {
-      setCompletingId(item.id);
-      try {
-        const updated = await putawayService.completePutAwayItem(
-          selectedList.id,
-          item.id,
-          binIdOverride
-        );
-        setSelectedList((prev) => {
-          if (!prev) return null;
-          const newItems = prev.items.map((i) =>
-            i.id === item.id
-              ? { ...i, status: 'completed' as const, completed_at: updated.completed_at, bin_location_code: binIdOverride ? 'Scanned Bin' : i.bin_location_code }
-              : i
-          );
-          const allDone = newItems.every((i) => i.status === 'completed' || i.status === 'skipped');
-          return {
-            ...prev,
-            items: newItems,
-            completed_items: prev.completed_items + 1,
-            status: allDone ? ('completed' as const) : prev.status,
-          };
-        });
-        setOverrideBinId(null);
-        Alert.alert('Done', `Item ${item.sku} put away successfully.`);
-      } catch (err: any) {
-        Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
-      } finally {
-        setCompletingId(null);
-      }
-    };
-
-    Alert.alert(
-      'Confirm Put-Away',
-      `Put ${item.item_name || item.sku} (Qty: ${item.quantity}) into ${item.bin_full_path || item.bin_location_code}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Scan Different Bin',
-          onPress: () => {
-            setScannedItem(item);
-            setScanMode('bin');
-            setScannerVisible(true);
-          },
-        },
-        { text: 'Confirm', onPress: () => doComplete(overrideBinId ?? undefined) },
-      ]
-    );
+  // ---------- Mark items completed in local state ----------
+  const markItemsCompleted = (completedIds: string[], binLabel: string) => {
+    setSelectedList((prev) => {
+      if (!prev) return null;
+      const newItems = prev.items.map((i) =>
+        completedIds.includes(i.id)
+          ? { ...i, status: 'completed' as const, completed_at: new Date().toISOString(), bin_location_code: binLabel, bin_full_path: binLabel }
+          : i
+      );
+      const doneCount = newItems.filter((i) => i.status === 'completed').length;
+      const pendingCount = newItems.filter((i) => i.status === 'pending').length;
+      const allDone = newItems.every((i) => i.status === 'completed' || i.status === 'skipped');
+      return {
+        ...prev,
+        items: newItems,
+        completed_items: doneCount,
+        pending_items: pendingCount,
+        status: allDone ? ('completed' as const) : prev.status,
+      };
+    });
   };
 
-  // ---------- Handle QR Scan Result ----------
-  const handleQRScan = (data: string) => {
-    setScannerVisible(false);
-    if (scanMode === 'bin') {
-      // Bin QR scanned — use as override
-      setOverrideBinId(data);
-      if (scannedItem) {
-        const item = scannedItem;
-        Alert.alert(
-          'Bin Scanned',
-          `Bin: ${data}\n\nComplete put-away for ${item.item_name || item.sku}?`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => setOverrideBinId(null) },
-            {
-              text: 'Confirm',
-              onPress: async () => {
-                if (!selectedList) return;
-                setCompletingId(item.id);
-                try {
-                  await putawayService.completePutAwayItem(selectedList.id, item.id, data);
-                  setSelectedList((prev) => {
-                    if (!prev) return null;
-                    const newItems = prev.items.map((i) =>
-                      i.id === item.id
-                        ? { ...i, status: 'completed' as const, completed_at: new Date().toISOString(), bin_location_code: data }
-                        : i
-                    );
-                    const allDone = newItems.every((i) => i.status === 'completed' || i.status === 'skipped');
-                    return {
-                      ...prev,
-                      items: newItems,
-                      completed_items: prev.completed_items + 1,
-                      status: allDone ? ('completed' as const) : prev.status,
-                    };
-                  });
-                  Alert.alert('Done', `Item put away into bin ${data}.`);
-                } catch (err: any) {
-                  Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
-                } finally {
-                  setCompletingId(null);
-                  setOverrideBinId(null);
-                  setScannedItem(null);
-                }
-              },
-            },
-          ]
-        );
-      }
+  // ---------- Assign a single item ----------
+  const handleAssignItem = async (item: PutAwayItem, bin: BinInfo) => {
+    if (!selectedList) return;
+    setCompletingId(item.id);
+    try {
+      await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
+      markItemsCompleted([item.id], bin.full_path || bin.location_code || bin.qr_code);
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
+    } finally {
+      setCompletingId(null);
     }
-    // item scan mode — could be used to verify item QR in the future
+  };
+
+  // ---------- Assign all pending items in a group ----------
+  const handleAssignGroup = async (group: PutAwayGroup, bin: BinInfo) => {
+    if (!selectedList) return;
+    const pending = group.children.filter((c) => c.status === 'pending');
+    if (pending.length === 0) return;
+    setAssigningAll(true);
+    const completedIds: string[] = [];
+    for (const item of pending) {
+      try {
+        await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
+        completedIds.push(item.id);
+      } catch {}
+    }
+    setAssigningAll(false);
+    markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
+  };
+
+  // ---------- Assign all pending items ----------
+  const handleAssignAll = async (locationId: string, binLabel: string) => {
+    if (!selectedList) return;
+    const pending = selectedList.items.filter((i) => i.status === 'pending');
+    if (pending.length === 0) {
+      Alert.alert('Info', 'No pending items.');
+      return;
+    }
+    setAssigningAll(true);
+    const completedIds: string[] = [];
+    for (const item of pending) {
+      try {
+        await putawayService.completePutAwayItem(selectedList.id, item.id, locationId);
+        completedIds.push(item.id);
+      } catch {}
+    }
+    setAssigningAll(false);
+    markItemsCompleted(completedIds, binLabel);
+    Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
+  };
+
+  // ---------- Toggle group expand ----------
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
   };
 
   // ---------- Skip Item ----------
@@ -235,13 +236,7 @@ export default function PutawayScreen() {
 
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Put-Away Lists</Text>
-          <Text style={styles.headerSubtitle}>
-            {pendingCount} pending · {selectedWarehouse?.name || ''}
-          </Text>
-        </View>
-
+        <Header title="Put-Away Lists" subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`} />
         {/* Direct Put-Away button */}
         <TouchableOpacity
           style={styles.directPutawayButton}
@@ -258,6 +253,7 @@ export default function PutawayScreen() {
         </TouchableOpacity>
 
         <FlatList
+          style={{ flex: 1 }}
           data={lists}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -327,8 +323,22 @@ export default function PutawayScreen() {
     const completedCount = selectedList.completed_items ?? selectedList.items.filter((i) => i.status === 'completed').length;
     const allDone = completedCount === selectedList.items.length;
 
+    // Group items by product for a collapsible box → child table
+    const groups: PutAwayGroup[] = [];
+    const groupIndex = new Map<string, PutAwayGroup>();
+    for (const item of selectedList.items) {
+      const key = item.item_id || item.item_name || item.sku || item.id;
+      let group = groupIndex.get(key);
+      if (!group) {
+        group = { key, name: item.item_name || item.sku, sku: item.sku, children: [] };
+        groupIndex.set(key, group);
+        groups.push(group);
+      }
+      group.children.push(item);
+    }
+
     return (
-      <View style={styles.container}>
+      <>
         {/* Skip reason modal */}
         <Modal visible={skipModalVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -360,33 +370,23 @@ export default function PutawayScreen() {
           </View>
         </Modal>
 
-        {/* QR Scanner overlay */}
-        {scannerVisible && (
-          <View style={StyleSheet.absoluteFill}>
-            <QrScanner
-              onScan={handleQRScan}
-              onClose={() => { setScannerVisible(false); setScannedItem(null); }}
-              title={scanMode === 'bin' ? 'Scan Bin QR' : 'Scan Item QR'}
-              subtitle={scanMode === 'bin' ? 'Scan the bin location QR code' : 'Scan item to confirm'}
-            />
-          </View>
-        )}
-
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBackToList}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{selectedList.put_away_list_no}</Text>
-          <Text style={styles.headerSubtitle}>
-            {completedCount}/{selectedList.items.length} done
-            {allDone && ' · ✅ COMPLETE'}
-          </Text>
-          {/* Progress bar */}
-          <View style={styles.detailProgressBar}>
-            <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
-          </View>
-        </View>
+        <AssignView
+          title={selectedList.put_away_list_no}
+          subtitle={`${completedCount}/${selectedList.items.length} done${allDone ? ' · ✅ COMPLETE' : ''}`}
+          isAssigning={assigningAll}
+          doneCount={completedCount}
+          pendingCount={selectedList.items.filter((i) => i.status === 'pending').length}
+          onAssignAll={(locationId, binLabel) => handleAssignAll(locationId, binLabel)}
+          onBack={handleBackToList}
+        >
+          {(ctx) => (
+            <View>
+              {/* Progress bar */}
+              <View style={styles.detailProgressBarWrap}>
+                <View style={styles.detailProgressBar}>
+                  <View style={[styles.detailProgressFill, { width: `${selectedList.items.length > 0 ? Math.round((completedCount / selectedList.items.length) * 100) : 0}%` }]} />
+                </View>
+              </View>
 
         {/* Warnings */}
         {selectedList.warnings && selectedList.warnings.length > 0 && (
@@ -397,111 +397,125 @@ export default function PutawayScreen() {
           </View>
         )}
 
-        {/* Items */}
-        <FlatList
-          data={selectedList.items}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.detailContent}
-          renderItem={({ item, index }) => {
-            const isCurrent = item.status === 'pending' && index === selectedList.items.findIndex(i => i.status === 'pending');
+              {/* Table header */}
+              <View style={styles.tableHeaders}>
+                <Text style={[styles.tableHeader, styles.colProduct]}>Product / SKU</Text>
+                <Text style={[styles.tableHeader, styles.colBatch]}>Batch</Text>
+                <Text style={[styles.tableHeader, styles.colQty]}>Qty</Text>
+                <Text style={[styles.tableHeader, styles.colAction]}>Action</Text>
+              </View>
+
+              {/* Grouped rows */}
+              {groups.map((group) => {
+            const pendingChildren = group.children.filter((c) => c.status === 'pending');
+            const groupDone = group.children.every((c) => c.status === 'completed' || c.status === 'skipped');
+            const expanded = expandedGroups.has(group.key);
+            const totalQty = pendingChildren.reduce((sum, c) => sum + c.quantity, 0);
             return (
-            <View
-              style={[
-                styles.itemCard,
-                item.status === 'completed' && styles.itemCardDone,
-                item.status === 'skipped' && styles.itemCardSkipped,
-                isCurrent && styles.itemCardCurrent,
-              ]}
-            >
-              {/* Route indicator */}
-              <View style={styles.routeRow}>
-                <View style={[styles.routeBadge, item.status === 'completed' && styles.routeBadgeDone, item.status === 'skipped' && styles.routeBadgeSkipped]}>
-                  <Text style={styles.routeBadgeText}>
-                    {item.status === 'completed' ? '✓' : item.status === 'skipped' ? '✗' : `#${item.sort_order}`}
-                  </Text>
-                </View>
-                <Text style={styles.routeLabel}>
-                  {item.status === 'completed' ? 'Done' : item.status === 'skipped' ? 'Skipped' : isCurrent ? '← NEXT STOP' : 'Upcoming'}
-                </Text>
-              </View>
-
-              <View style={styles.itemHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemSku}>{item.item_name || item.sku}</Text>
-                  {item.item_name && <Text style={styles.itemSkuSub}>{item.sku}</Text>}
-                  <Text style={styles.itemBatch}>Batch: {item.batch_number}</Text>
-                </View>
-                <View
-                  style={[
-                    styles.itemStatusBadge,
-                    item.status === 'completed' && styles.itemStatusDone,
-                    item.status === 'skipped' && styles.itemStatusSkipped,
-                  ]}
+              <View key={group.key}>
+                {/* Group (box) row */}
+                <TouchableOpacity
+                  style={styles.tableRow}
+                  activeOpacity={0.7}
+                  onPress={() => toggleGroup(group.key)}
                 >
-                  <Text style={styles.itemStatusText}>{item.status}</Text>
-                </View>
-              </View>
-
-              <View style={styles.itemDetails}>
-                <View style={styles.itemDetailRow}>
-                  <Text style={styles.itemDetailLabel}>Qty:</Text>
-                  <Text style={styles.itemDetailValue}>{item.quantity}</Text>
-                </View>
-                <View style={styles.itemDetailRow}>
-                  <Text style={styles.itemDetailLabel}>Bin:</Text>
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={styles.itemBinCode}>{item.bin_full_path || item.bin_location_code}</Text>
+                  <View style={[styles.tableCell, styles.colProduct]}>
+                    <Text style={styles.tableName} numberOfLines={1}>
+                      {expanded ? '▼ ' : '▶ '}{group.name}
+                    </Text>
+                    <Text style={styles.tableSku} numberOfLines={1}>{group.sku}</Text>
                   </View>
-                </View>
-              </View>
-
-              {/* Action buttons */}
-              {item.status === 'pending' && (
-                <View style={styles.itemActions}>
-                  <TouchableOpacity
-                    style={styles.completeButton}
-                    onPress={() => handleCompleteItem(item)}
-                    disabled={completingId === item.id}
-                  >
-                    {completingId === item.id ? (
-                      <ActivityIndicator color="#fff" size="small" />
+                  <View style={[styles.tableCell, styles.colBatch]}>
+                    <Text style={styles.tableBatch}>—</Text>
+                  </View>
+                  <View style={[styles.tableCell, styles.colQty]}>
+                    <Text style={styles.tableQty}>{totalQty}</Text>
+                  </View>
+                  <View style={[styles.tableCell, styles.colAction]}>
+                    {groupDone ? (
+                      <View style={[styles.badge, styles.badgeDone]}>
+                        <Text style={styles.badgeText}>✓</Text>
+                      </View>
                     ) : (
-                      <Text style={styles.completeButtonText}>✓ Put Away</Text>
+                      <TouchableOpacity
+                        style={styles.assignBtn}
+                        onPress={() => {
+                          if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                          handleAssignGroup(group, ctx.bin);
+                        }}
+                        disabled={assigningAll}
+                      >
+                        {assigningAll ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={styles.assignBtnText}>Assign ({pendingChildren.length})</Text>
+                        )}
+                      </TouchableOpacity>
                     )}
-                  </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.scanBinButton}
-                    onPress={() => {
-                      setScannedItem(item);
-                      setScanMode('bin');
-                      setScannerVisible(true);
-                    }}
-                  >
-                    <Text style={styles.scanBinButtonText}>📷 Bin</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.skipButton}
-                    onPress={() => handleSkipItem(item)}
-                  >
-                    <Text style={styles.skipButtonText}>Skip</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {item.status === 'completed' && item.completed_at && (
-                <Text style={styles.completedAt}>
-                  Completed: {new Date(item.completed_at).toLocaleString()}
-                </Text>
-              )}
-              {item.status === 'skipped' && item.notes && (
-                <Text style={styles.skippedReason}>Reason: {item.notes}</Text>
-              )}
-            </View>
-          );
-          }}
-        />
+                {/* Child rows */}
+                {expanded &&
+                  group.children.map((child) => {
+                    const isDone = child.status === 'completed';
+                    const isSkipped = child.status === 'skipped';
+                    return (
+                      <View
+                        key={child.id}
+                        style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
+                      >
+                        <View style={[styles.tableCell, styles.colProduct]}>
+                          <Text style={styles.tableChildName} numberOfLines={1}>
+                            {'   '}{child.batch_number || child.sku || group.name}
+                          </Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.colBatch]}>
+                          <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number || '—'}</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.colQty]}>
+                          <Text style={styles.tableQty}>{child.quantity}</Text>
+                        </View>
+                        <View style={[styles.tableCell, styles.colAction]}>
+                          {isDone ? (
+                            <View style={[styles.badge, styles.badgeDone]}>
+                              <Text style={styles.badgeText}>✓</Text>
+                            </View>
+                          ) : isSkipped ? (
+                            <View style={[styles.badge, styles.badgeSkipped]}>
+                              <Text style={styles.badgeText}>✕</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.actionRow}>
+                              <TouchableOpacity
+                                style={styles.assignBtn}
+                                onPress={() => {
+                                  if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                                  handleAssignItem(child, ctx.bin);
+                                }}
+                                disabled={completingId === child.id}
+                              >
+                                {completingId === child.id ? (
+                                  <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                  <Text style={styles.assignBtnText}>Assign</Text>
+                                )}
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.skipBtnSmall}
+                                onPress={() => handleSkipItem(child)}
+                              >
+                                <Text style={styles.skipBtnSmallText}>✕</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+              </View>
+            );
+          })}
 
         {/* All done state */}
         {allDone && (
@@ -511,7 +525,10 @@ export default function PutawayScreen() {
             </Text>
           </View>
         )}
-      </View>
+            </View>
+          )}
+        </AssignView>
+      </>
     );
   }
 
@@ -521,16 +538,117 @@ export default function PutawayScreen() {
 // ============ STYLES ============
 
 const styles = StyleSheet.create({
+  // Container + header (AssignView style)
   container: { flex: 1, backgroundColor: '#0F1923' },
   header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 24,
-    backgroundColor: '#1A2332',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16,
   },
-  headerTitle: { color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 8 },
-  headerSubtitle: { color: '#8899AA', fontSize: 14, marginTop: 4 },
-  backButton: { color: '#1A73E8', fontSize: 16, fontWeight: '600' },
+  backBtn: { padding: 6 },
+  backIcon: { color: '#fff', fontSize: 28, lineHeight: 30 },
+  headerSpacer: { width: 36 },
+  headerTitleWrap: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#fff', textAlign: 'center' },
+  headerSubtitle: { fontSize: 12, color: '#8899AA', marginTop: 2, textAlign: 'center' },
+
+  // Table (AssignView-style)
+  tableContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  tableHeaders: {
+    flexDirection: 'row',
+    backgroundColor: '#0F1923',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+  },
+  tableHeader: { color: '#667788', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  colProduct: { flex: 5, minWidth: 0 },
+  colBatch: { flex: 2, minWidth: 0 },
+  colQty: { width: 44, alignItems: 'center' as const },
+  colAction: { width: 116, alignItems: 'flex-end' as const },
+
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A2332',
+    borderWidth: 1,
+    borderColor: '#2A3A4A',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  tableRowDone: { opacity: 0.55, borderColor: '#10B981' },
+  tableRowSkipped: { opacity: 0.55, borderColor: '#EF4444' },
+  tableCell: { justifyContent: 'center' },
+  tableRoute: { color: '#1A73E8', fontSize: 10, fontWeight: '700', marginRight: 4 },
+  tableName: { color: '#E0E8F0', fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  tableSku: { color: '#667788', fontSize: 10, marginTop: 1 },
+  tableBin: { color: '#60A5FA', fontSize: 11, marginTop: 2 },
+  tableMeta: { color: '#10B981', fontSize: 10, marginTop: 2 },
+  tableBatch: { color: '#8899AA', fontSize: 11 },
+  tableQty: { color: '#B0C4D8', fontSize: 13, fontWeight: '600', textAlign: 'center' },
+
+  badge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  badgeDone: { backgroundColor: '#10B981' },
+  badgeSkipped: { backgroundColor: '#EF4444' },
+  badgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+
+  actionRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  completeIconBtn: { backgroundColor: '#10B981', width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  completeIconText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  scanIconBtn: { backgroundColor: '#1A3A5C', width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  scanIconText: { fontSize: 15 },
+  skipIconBtn: { backgroundColor: '#374151', width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  skipIconText: { color: '#9CA3AF', fontSize: 16, fontWeight: '700' },
+
+  // Bin input + resolved row (AssignView-style)
+  binRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#1F2937', borderRadius: 12, margin: 16, marginTop: 0,
+    padding: 4, paddingLeft: 12,
+  },
+  binInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  cubeIcon: { marginRight: 6, fontSize: 16 },
+  binInput: { flex: 1, fontSize: 16, color: '#F9FAFB', paddingVertical: 10 },
+  scanBtn: { padding: 8 },
+  scanIcon: { fontSize: 18 },
+  goBtn: { backgroundColor: '#2563EB', borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
+  goBtnDisabled: { backgroundColor: '#1E3A5F' },
+  goBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  resolvingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, padding: 8 },
+  resolvingText: { color: '#9CA3AF', fontSize: 14 },
+  resolvedRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 16, marginBottom: 8,
+    backgroundColor: '#064E3B', borderRadius: 10, padding: 12,
+  },
+  resolvedInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  checkIcon: { fontSize: 16 },
+  resolvedPath: { fontSize: 14, color: '#34D399', fontWeight: '500', flex: 1 },
+  assignAllBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
+  },
+  btnDisabled: { opacity: 0.5 },
+  assignIcon: { fontSize: 14 },
+  assignAllText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+
+  // Table child rows + assign buttons
+  tableRowChild: { backgroundColor: '#0F1923' },
+  tableChildName: { color: '#8899AA', fontSize: 12, fontFamily: 'monospace' },
+  assignBtn: { backgroundColor: '#1A73E8', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  assignBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  skipBtnSmall: { backgroundColor: '#374151', width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  skipBtnSmallText: { color: '#9CA3AF', fontSize: 14, fontWeight: '700' },
+
+  // Scanner modal
+  scannerContainer: { flex: 1, backgroundColor: '#000' },
+  scannerCloseBtn: {
+    position: 'absolute', top: 50, right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 8,
+  },
+  closeIcon: { color: '#fff', fontSize: 24, lineHeight: 26 },
 
   // List
   listContent: { padding: 24, paddingBottom: 40 },
@@ -673,7 +791,8 @@ const styles = StyleSheet.create({
   itemSkuSub: { color: '#667788', fontSize: 12, marginTop: 1 },
 
   // Detail progress bar
-  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3, marginTop: 12 },
+  detailProgressBarWrap: { paddingHorizontal: 24, marginTop: 12, marginBottom: 4 },
+  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3 },
   detailProgressFill: { height: 6, backgroundColor: '#1A73E8', borderRadius: 3 },
 
   // Direct Put-Away button
@@ -682,6 +801,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1A3A5C',
     marginHorizontal: 24,
+    marginTop: 16,
     borderRadius: 12,
     padding: 16,
     gap: 12,

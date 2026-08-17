@@ -267,6 +267,7 @@ export interface CompletePutawayRequest {
   qr: string;
   bin_id: string;
   quantity?: number;
+  put_away_list_id?: string;
 }
 
 export interface CompletePutawayResponse {
@@ -547,6 +548,14 @@ export interface LinkAsnRequest {
 // ---------- Reject Item Request ----------
 export interface RejectItemRequest {
   reason: string;
+  notes?: string;
+}
+
+// ---------- Bulk Item Status Update ----------
+export interface ItemStatusUpdate {
+  item_id: string;
+  status: 'rejected' | 'ok' | 'short' | 'damaged';
+  reason?: string;
   notes?: string;
 }
 

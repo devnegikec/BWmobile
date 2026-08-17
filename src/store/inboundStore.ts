@@ -442,24 +442,28 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     let successCount = 0;
     let failCount = 0;
 
-    for (const item of uniqueItems.values()) {
-      const key = `${item.sku}||${item.batch_number || ''}`;
-      const rejection = rejections[key];
-      try {
-        console.log('[rejectSlipItems] Rejecting item:', { itemId: item.id, sku: item.sku, batch: item.batch_number, reason: rejection?.reason });
-        await inboundService.rejectSlipItem(slipId, item.id, {
-          reason: rejection?.reason || 'Rejected during review',
-        });
-        successCount++;
-        console.log('[rejectSlipItems] Rejected OK:', item.id);
-      } catch (err: any) {
-        failCount++;
-        console.error(`[rejectSlipItems] FAILED to reject item ${item.id}:`, {
-          status: err?.response?.status,
-          data: err?.response?.data,
-          message: err?.message,
-        });
-      }
+    // Build a single bulk payload with per-item status
+    const payload = Array.from(uniqueItems.values()).map((item) => {
+      const serial = item.serial_number || '';
+      const reason =
+        rejections[serial]?.reason ||
+        rejections[`${item.sku}||${item.batch_number || ''}`]?.reason ||
+        'Rejected during review';
+      return { item_id: item.id, status: 'rejected' as const, reason };
+    });
+
+    try {
+      console.log('[rejectSlipItems] Bulk rejecting items:', payload);
+      await inboundService.updateSlipItemsStatus(slipId, payload);
+      successCount = payload.length;
+      console.log('[rejectSlipItems] Bulk reject OK:', payload.length, 'items');
+    } catch (err: any) {
+      failCount = payload.length;
+      console.error('[rejectSlipItems] Bulk reject FAILED:', {
+        status: err?.response?.status,
+        data: err?.response?.data,
+        message: err?.message,
+      });
     }
 
     console.log('[rejectSlipItems] Done:', { successCount, failCount, total: uniqueItems.size });
