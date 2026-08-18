@@ -163,7 +163,7 @@ export default function DashboardScreen({ navigation }: any) {
             <Text style={styles.cardTitle}>Link QSeal</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.card, styles.cardDisabled]} disabled>
+          <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Pick')}>
             <View style={styles.cardIconBox}>
               <Text style={styles.cardIcon}>📤</Text>
             </View>

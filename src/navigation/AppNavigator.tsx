@@ -13,6 +13,7 @@ import QrLoginScreen from '../screens/QrLoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import InboundScreen from '../screens/InboundScreen';
 import PutawayScreen from '../screens/PutawayScreen';
+import PickScreen from '../screens/PickScreen';
 import DirectPutawayScreen from '../screens/DirectPutawayScreen';
 import AssignBinScreen from '../screens/AssignBinScreen';
 import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
@@ -30,6 +31,7 @@ export type AppTabsParamList = {
   Inbound: undefined;
   AssignBin: undefined;
   Putaway: undefined;
+  Pick: undefined;
   ReceivingSlips: undefined;
 };
 
@@ -120,6 +122,16 @@ function AppTabs() {
           tabBarLabel: 'Put-Away',
           tabBarIcon: ({ color }) => (
             <TabIcon label="📍" color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Pick"
+        component={PickScreen}
+        options={{
+          tabBarLabel: 'Pick',
+          tabBarIcon: ({ color }) => (
+            <TabIcon label="📤" color={color} />
           ),
         }}
       />
