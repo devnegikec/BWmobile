@@ -41,7 +41,6 @@ export function useInboundFlow() {
     clearSession,
     fetchAsnOrders,
     selectAsn,
-    rejectSlipItems,
   } = useInboundStore();
 
   const [step, setStep] = useState<InboundStep>('idle');
@@ -202,11 +201,9 @@ export function useInboundFlow() {
         text: 'End Session',
         onPress: async () => {
           try {
-            const slip = await endSession();
-            // After slip is created, reject marked items
-            if (Object.values(itemRejections).some((r) => r.rejected)) {
-              await rejectSlipItems(slip.id);
-            }
+            // Rejections are sent with the end-session call, so the backend
+            // applies them before finalizing the receiving slip.
+            await endSession();
           } catch (err: any) {
             Alert.alert('Error', err.message);
           }

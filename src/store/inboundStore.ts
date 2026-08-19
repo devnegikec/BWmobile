@@ -217,18 +217,59 @@ export const useInboundStore = create<InboundState>((set, get) => ({
 
   // ---------- End Session ----------
   endSession: async () => {
-    const session = get().currentSession;
+    const state = get();
+    const session = state.currentSession;
     if (!session) throw new Error('No active session.');
+
+    // Build the rejection payload from the local rejection state. Rejections
+    // are sent with the end-session call so the backend applies them BEFORE
+    // finalizing the slip (rejected items never enter stock or put-away).
+    const { itemRejections, linkedUnitsParents } = state;
+    const childIdToSerial = new Map<string, string>();
+    const parentIdToSerials = new Map<string, string[]>();
+    for (const parent of linkedUnitsParents) {
+      const units = parent.linked_units || [];
+      parentIdToSerials.set(
+        parent.id,
+        units.map((u) => u.serial_number).filter((s): s is string => !!s)
+      );
+      for (const unit of units) {
+        if (unit.serial_number) childIdToSerial.set(unit.id, unit.serial_number);
+      }
+    }
+    const serialReasons = new Map<string, string>();
+    for (const [key, val] of Object.entries(itemRejections)) {
+      if (!val || !val.rejected) continue;
+      const reason = val.reason || 'Rejected during review';
+      if (key.startsWith('qseal-parent||')) {
+        const pid = key.slice('qseal-parent||'.length);
+        for (const s of parentIdToSerials.get(pid) || []) {
+          serialReasons.set(s, reason);
+        }
+      } else if (key.startsWith('qseal-child||')) {
+        const cid = key.slice('qseal-child||'.length);
+        const s = childIdToSerial.get(cid);
+        if (s) serialReasons.set(s, reason);
+      } else if (!key.includes('||')) {
+        // Pure serial-number key (child rejection stores this directly).
+        serialReasons.set(key, reason);
+      }
+    }
+    const rejections = Array.from(serialReasons.entries()).map(
+      ([serial_number, reason]) => ({ serial_number, reason })
+    );
+
     console.log('[Store] endSession — current session ASN details:', {
       sessionId: session.id,
       asn_order_id: session.asn_order_id || 'NOT SET',
       asn_order_no: session.asn_order_no || 'NOT SET',
       dock: session.dock_location,
       boxes: session.total_boxes_scanned,
+      rejectionsCount: rejections.length,
     });
     set({ isLoading: true });
     try {
-      const slip = await inboundService.endSession(session.id);
+      const slip = await inboundService.endSession(session.id, rejections);
       // The end-session response may not include items — fetch the full slip
       let fullSlip = slip;
       if (!slip.items || slip.items.length === 0) {

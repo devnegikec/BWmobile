@@ -49,10 +49,22 @@ export async function getSessionSummary(sessionId: string): Promise<SessionSumma
 }
 
 // ---------- End Session (Generate Receiving Slip) ----------
-export async function endSession(sessionId: string): Promise<ReceivingSlip> {
-  console.log('[API] endSession called:', { sessionId });
+export interface RejectionPayload {
+  serial_number: string;
+  reason?: string;
+}
+
+export async function endSession(
+  sessionId: string,
+  rejections?: RejectionPayload[]
+): Promise<ReceivingSlip> {
+  console.log('[API] endSession called:', {
+    sessionId,
+    rejectionsCount: rejections?.length || 0,
+  });
   const { data } = await coreClient.post<ReceivingSlip>(
-    `/inbound/sessions/${sessionId}/end`
+    `/inbound/sessions/${sessionId}/end`,
+    { rejections: rejections || [] }
   );
   console.log('[API] endSession response:', {
     slipId: data.id,
