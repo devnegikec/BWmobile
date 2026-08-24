@@ -230,3 +230,15 @@ export async function assignBinToSlipItem(
   );
   return data;
 }
+
+// ---------- Register Vehicle Arrival (HC-03) ----------
+export async function registerVehicleArrival(
+  payload: import('../types').VehicleArrivalCreatePayload
+): Promise<import('../types').VehicleArrival> {
+  console.log('[API] POST /vehicle-arrivals — payload:', JSON.stringify(payload));
+  const { data } = await coreClient.post<import('../types').VehicleArrival>(
+    '/vehicle-arrivals',
+    payload
+  );
+  return data;
+}

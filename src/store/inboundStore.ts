@@ -14,6 +14,22 @@ import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
 import * as qsealService from '../api/qsealService';
 
+// ---- Extract the real backend error message. The core-service returns
+// ---- `message` (custom ValidationError) or `detail` (HTTPException / nested),
+// ---- so check all shapes. Returns '' when nothing is available.
+function getBackendErrorMessage(err: any): string {
+  const data = err?.response?.data;
+  const detail = data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    return detail.message || detail.error || '';
+  }
+  if (data && typeof data.message === 'string' && data.message.trim()) {
+    return data.message;
+  }
+  return '';
+}
+
 interface InboundState {
   // Current session
   currentSession: InboundSession | null;
@@ -119,7 +135,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       });
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
       let message = 'Failed to start session.';
 
       if (status === 403) {
@@ -165,7 +181,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       });
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
       let message = 'Duplicate scan or invalid QR.';
 
       if (status === 403) {
@@ -296,7 +312,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       return fullSlip;
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
       const responseData = error.response?.data;
       let message = 'Failed to end session.';
 

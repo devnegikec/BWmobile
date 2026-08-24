@@ -19,6 +19,10 @@ interface Props {
   warehouseName: string;
   dockLocation: string;
   onDockLocationChange: (value: string) => void;
+  vehicleNumber: string;
+  onVehicleNumberChange: (value: string) => void;
+  driverName: string;
+  onDriverNameChange: (value: string) => void;
   selectedAsn: AsnOrder | null;
   availableAsns: AsnOrder[];
   isFetchingAsns: boolean;
@@ -35,6 +39,10 @@ export default function StartSessionView({
   warehouseName,
   dockLocation,
   onDockLocationChange,
+  vehicleNumber,
+  onVehicleNumberChange,
+  driverName,
+  onDriverNameChange,
   selectedAsn,
   availableAsns,
   isFetchingAsns,
@@ -68,6 +76,33 @@ export default function StartSessionView({
             placeholderTextColor="#667788"
             value={dockLocation}
             onChangeText={onDockLocationChange}
+          />
+        </View>
+
+        {/* Vehicle Arrival (HC-03) */}
+        <View style={styles.sectionDivider}>
+          <Text style={styles.sectionTitle}>Vehicle Arrival (Optional)</Text>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Vehicle Number</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g., KA01AB1234"
+            placeholderTextColor="#667788"
+            value={vehicleNumber}
+            onChangeText={onVehicleNumberChange}
+          />
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Driver Name</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Driver name (optional)"
+            placeholderTextColor="#667788"
+            value={driverName}
+            onChangeText={onDriverNameChange}
           />
         </View>
 
@@ -218,6 +253,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#2A3A4A',
+  },
+  sectionDivider: {
+    marginTop: 4,
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2A3A4A',
+    paddingBottom: 8,
+  },
+  sectionTitle: {
+    color: '#8899AA',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   primaryButton: {
     backgroundColor: '#1A73E8',

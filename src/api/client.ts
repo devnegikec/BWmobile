@@ -10,13 +10,13 @@ import { Platform } from 'react-native';
 // All values sourced from .env (EXPO_PUBLIC_*), with fallbacks for safety.
 const IDENTITY_BASE_URL =
   process.env.EXPO_PUBLIC_IDENTITY_URL ||
-  'https://identity-service-production-a1eb.up.railway.app/api/v1';
+  'http://localhost:8000/api/v1';
 const CORE_BASE_URL =
   process.env.EXPO_PUBLIC_CORE_URL ||
-  'https://core-service-production-66e9.up.railway.app/api/v1';
+  'http://localhost:8001/api/v1';
 export const SEARCH_BASE_URL =
   process.env.EXPO_PUBLIC_SEARCH_URL ||
-  'https://420a-2401-4900-619a-4bf0-89c0-e9f1-13b8-73fc.ngrok-free.app/api/v1';
+  'http://localhost:8002/api/v1';
 
 // ---------- Request timeout (ms) ----------
 const REQUEST_TIMEOUT = Number(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT) || 15000;

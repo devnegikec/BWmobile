@@ -102,6 +102,38 @@ export interface StartSessionRequest {
   asn_order_id?: string;
 }
 
+// ---------- Vehicle Arrival (inbound dock check-in) ----------
+export interface VehicleArrivalCreatePayload {
+  vehicle_no: string;
+  driver_name?: string;
+  driver_contact?: string;
+  transporter?: string;
+  warehouse_id?: string;
+  dock?: string;
+  asn_order_ids?: string[];
+  notes?: string;
+}
+
+export interface VehicleArrival {
+  id: string;
+  organization_id: string;
+  vehicle: {
+    id: string;
+    vehicle_no: string;
+    driver_name?: string | null;
+    driver_contact?: string | null;
+    transporter?: string | null;
+  } | null;
+  warehouse_id?: string | null;
+  dock?: string | null;
+  status: string;
+  arrived_at: string;
+  notes?: string | null;
+  asn_orders?: { id: string; asn_order_no: string; status?: string | null }[];
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface RecordScanRequest {
   qr_data: string;
   device_type?: string;

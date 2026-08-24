@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import * as qsealService from '../api/qsealService';
+import { registerVehicleArrival } from '../api/inboundService';
 import { extractQSealSerial } from '../utils/qsealUrl';
 
 export type InboundStep = 'idle' | 'scanning' | 'summary' | 'slip_generated';
@@ -45,6 +46,8 @@ export function useInboundFlow() {
 
   const [step, setStep] = useState<InboundStep>('idle');
   const [dockLocation, setDockLocation] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [driverName, setDriverName] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
   const [showAsnPicker, setShowAsnPicker] = useState(false);
   // Prevent duplicate QSeal scans
@@ -76,6 +79,16 @@ export function useInboundFlow() {
     }
     try {
       clearLinkedUnits();
+      // HC-03: register vehicle arrival (optional) before starting unloading
+      if (vehicleNumber.trim()) {
+        await registerVehicleArrival({
+          vehicle_no: vehicleNumber.trim(),
+          driver_name: driverName.trim() || undefined,
+          warehouse_id: selectedWarehouse.id,
+          dock: dockLocation.trim(),
+          asn_order_ids: selectedAsn?.id ? [selectedAsn.id] : [],
+        });
+      }
       await startSession(selectedWarehouse.id, dockLocation.trim(), selectedAsn?.id);
       setStep('scanning');
     } catch (err: any) {
@@ -216,6 +229,8 @@ export function useInboundFlow() {
     clearSession();
     clearLinkedUnits();
     setDockLocation('');
+    setVehicleNumber('');
+    setDriverName('');
     setShowAsnPicker(false);
     setScannedQSealSerials(new Set());
     setStep('idle');
@@ -234,6 +249,8 @@ export function useInboundFlow() {
             clearSession();
             clearLinkedUnits();
             setDockLocation('');
+            setVehicleNumber('');
+            setDriverName('');
             setShowAsnPicker(false);
             setScannedQSealSerials(new Set());
             setStep('idle');
@@ -257,6 +274,10 @@ export function useInboundFlow() {
     // Form state
     dockLocation,
     setDockLocation,
+    vehicleNumber,
+    setVehicleNumber,
+    driverName,
+    setDriverName,
     isProcessingQSeal,
     showAsnPicker,
     setShowAsnPicker,
