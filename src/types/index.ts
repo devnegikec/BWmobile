@@ -150,6 +150,51 @@ export interface ScanRecord {
   packaging_unit_id: string | null;
   scanned_at: string;
   total_boxes_scanned: number;
+  exception_id?: string | null;
+  exception_status?: string | null;
+}
+
+export type InboundExceptionClassification = 'short' | 'damaged' | 'excess' | 'hold' | 'quarantine';
+export type InboundExceptionDestination = 'HOLD' | 'QUARANTINE';
+
+export interface InboundScanExceptionInput {
+  serial_number: string;
+  classification: InboundExceptionClassification;
+  reason_code: string;
+  destination?: InboundExceptionDestination;
+  note?: string;
+  evidence_uri?: string;
+  evidence_name?: string;
+  evidence_type?: string;
+}
+
+export interface InboundExceptionEvidence {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+export interface InboundException {
+  id: string;
+  warehouse_id: string;
+  slip_id?: string | null;
+  slip_item_id?: string | null;
+  exception_type: string;
+  reason_code: string;
+  status: string;
+  condition_code: string;
+  destination?: InboundExceptionDestination | 'RECEIVING-STAGE' | null;
+  destination_location_id?: string | null;
+  qr_identifier?: string | null;
+  sku?: string | null;
+  batch_number?: string | null;
+  quantity: number;
+  note?: string | null;
+  disposition?: string | null;
+  disposition_note?: string | null;
+  created_at?: string | null;
+  evidence: InboundExceptionEvidence[];
 }
 
 export interface SessionSummary {
@@ -220,6 +265,9 @@ export interface ReceivingSlipGroupItem {
   quantity: number;
   box_count: number;
   flag: string;
+  condition_code?: string | null;
+  exception_status?: string | null;
+  exception_destination_location_id?: string | null;
   notes: string | null;
 }
 
@@ -229,7 +277,9 @@ export interface ReceivingSlipItem {
   batch_number: string;
   quantity: number;
   box_count: number;
-  flag: 'ok' | 'short' | 'damaged' | 'rejected';
+  flag: 'ok' | 'short' | 'damaged' | 'excess' | 'hold' | 'quarantine' | 'rejected';
+  condition_code?: string | null;
+  exception_status?: string | null;
   notes: string | null;
   rejection_reason?: string | null;
   rejected_at?: string | null;
@@ -438,7 +488,11 @@ export interface Pagination {
 }
 
 export interface PaginatedResponse<T> {
-  [key: string]: T[];
+  items?: T[];
+  receiving_slips?: T[];
+  asn_orders?: T[];
+  put_away_lists?: T[];
+  tracking_items?: T[];
   pagination: Pagination;
 }
 
@@ -461,7 +515,7 @@ export interface AsnOrder {
   id: string;
   asn_order_no: string;
   supplier_name: string;
-  status: string;
+  status: 'draft' | 'confirmed' | 'partially_delivered' | 'delivered' | 'closed';
   expected_boxes: number;
   expected_items: number;
   created_at: string;

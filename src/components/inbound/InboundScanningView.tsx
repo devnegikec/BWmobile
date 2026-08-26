@@ -1,10 +1,19 @@
 // ============================================================
 // InboundScanningView — Full-screen QR scanning state
 // ============================================================
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, TextInput } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import QrScanner from '../QrScanner';
-import type { InboundSession, ScanRecord } from '../../types';
+import type { InboundExceptionClassification, InboundExceptionDestination, InboundScanExceptionInput, InboundSession, ScanRecord } from '../../types';
+
+const REASON_BY_CLASSIFICATION: Record<InboundExceptionClassification, string> = {
+  short: 'SHORT_PHYSICAL',
+  damaged: 'DAMAGED',
+  excess: 'EXCESS',
+  hold: 'HOLD',
+  quarantine: 'QUARANTINE',
+};
 
 interface Props {
   session: InboundSession;
@@ -16,6 +25,7 @@ interface Props {
   onViewSummary: () => void;
   onEndSession: () => void;
   onCancel: () => void;
+  onClassifyLastScan: (exception: Omit<InboundScanExceptionInput, 'serial_number'>) => void;
 }
 
 export default function InboundScanningView({
@@ -28,7 +38,54 @@ export default function InboundScanningView({
   onViewSummary,
   onEndSession,
   onCancel,
+  onClassifyLastScan,
 }: Props) {
+  const [showException, setShowException] = useState(false);
+  const [classification, setClassification] = useState<InboundExceptionClassification>('damaged');
+  const [reasonCode, setReasonCode] = useState('DAMAGED');
+  const [destination, setDestination] = useState<InboundExceptionDestination | undefined>();
+  const [note, setNote] = useState('');
+  const [evidence, setEvidence] = useState<{
+    uri: string;
+    name?: string | null;
+    type?: string | null;
+  } | null>(null);
+
+  const chooseClassification = (value: InboundExceptionClassification) => {
+    setClassification(value);
+    setReasonCode(REASON_BY_CLASSIFICATION[value]);
+    setDestination(undefined);
+  };
+
+  const chooseEvidence = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setEvidence({ uri: asset.uri, name: asset.fileName, type: asset.mimeType });
+    }
+  };
+
+  const saveException = () => {
+    if (!lastScan) return;
+    const requiresDestination = ['damaged', 'excess', 'hold', 'quarantine'].includes(classification);
+    if (requiresDestination && !destination) return;
+    onClassifyLastScan({
+      classification,
+      reason_code: reasonCode,
+      destination,
+      note: note.trim() || undefined,
+      evidence_uri: evidence?.uri,
+      evidence_name: evidence?.name || undefined,
+      evidence_type: evidence?.type || undefined,
+    });
+    setShowException(false);
+    setNote('');
+    setEvidence(null);
+  };
+
   return (
     <View style={styles.container}>
       {/* Session info bar */}
@@ -66,6 +123,9 @@ export default function InboundScanningView({
           <Text style={styles.lastScanText}>
             ✅ {lastScan.sku} · Qty: {lastScan.raw_quantity} · {lastScan.batch_number || 'No batch'}
           </Text>
+          <TouchableOpacity style={styles.exceptionButton} onPress={() => setShowException(true)}>
+            <Text style={styles.exceptionButtonText}>Classify exception</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -96,6 +156,55 @@ export default function InboundScanningView({
           <Text style={styles.endButtonText}>End Session</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal visible={showException} transparent animationType="slide" onRequestClose={() => setShowException(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Classify scanned item</Text>
+            <Text style={styles.modalSubtitle}>
+              {lastScan?.sku} · {lastScan?.qr_identifier}
+            </Text>
+            <Text style={styles.fieldLabel}>Exception type</Text>
+            <View style={styles.choiceRow}>
+              {(['damaged', 'hold', 'quarantine', 'excess', 'short'] as InboundExceptionClassification[]).map((value) => (
+                <TouchableOpacity key={value} onPress={() => chooseClassification(value)}
+                  style={[styles.choice, classification === value && styles.choiceSelected]}>
+                  <Text style={[styles.choiceText, classification === value && styles.choiceTextSelected]}>{value.toUpperCase()}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Reason code</Text>
+            <TextInput value={reasonCode} onChangeText={setReasonCode} autoCapitalize="characters"
+              style={styles.textInput} placeholder="Select or enter a configured reason code" placeholderTextColor="#667788" />
+            {['damaged', 'excess', 'hold', 'quarantine'].includes(classification) && (
+              <>
+                <Text style={styles.fieldLabel}>Send to</Text>
+                <View style={styles.choiceRow}>
+                  {(['HOLD', 'QUARANTINE'] as InboundExceptionDestination[]).map((value) => (
+                    <TouchableOpacity key={value} onPress={() => setDestination(value)}
+                      style={[styles.choice, destination === value && styles.choiceSelected]}>
+                      <Text style={[styles.choiceText, destination === value && styles.choiceTextSelected]}>{value}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {!destination && <Text style={styles.validationText}>Choose HOLD or QUARANTINE.</Text>}
+              </>
+            )}
+            <TextInput value={note} onChangeText={setNote} multiline style={[styles.textInput, styles.noteInput]}
+              placeholder="Optional note" placeholderTextColor="#667788" />
+            <TouchableOpacity style={styles.evidenceButton} onPress={chooseEvidence}>
+              <Text style={styles.evidenceButtonText}>{evidence ? '✓ Evidence selected' : 'Add photo / evidence (optional)'}</Text>
+            </TouchableOpacity>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowException(false)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.modalSave, (!reasonCode || (['damaged', 'excess', 'hold', 'quarantine'].includes(classification) && !destination)) && styles.modalSaveDisabled]}
+                disabled={!reasonCode || (['damaged', 'excess', 'hold', 'quarantine'].includes(classification) && !destination)} onPress={saveException}>
+                <Text style={styles.modalSaveText}>Save classification</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -170,6 +279,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
+  exceptionButton: { alignSelf: 'center', marginTop: 10, backgroundColor: '#B45309', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  exceptionButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   scanActions: {
     flexDirection: 'row',
     padding: 16,
@@ -224,4 +335,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
+  modalCard: { backgroundColor: '#1A2332', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '88%' },
+  modalTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  modalSubtitle: { color: '#B0C4D8', marginTop: 4, fontSize: 13 },
+  fieldLabel: { color: '#B0C4D8', fontSize: 12, fontWeight: '700', marginTop: 16, marginBottom: 8 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  choice: { borderWidth: 1, borderColor: '#3A4A5A', borderRadius: 8, paddingHorizontal: 9, paddingVertical: 8 },
+  choiceSelected: { backgroundColor: '#1A73E8', borderColor: '#1A73E8' },
+  choiceText: { color: '#B0C4D8', fontSize: 11, fontWeight: '700' },
+  choiceTextSelected: { color: '#fff' },
+  textInput: { color: '#fff', borderWidth: 1, borderColor: '#3A4A5A', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
+  noteInput: { minHeight: 64, marginTop: 12, textAlignVertical: 'top' },
+  validationText: { color: '#FBBF24', fontSize: 12, marginTop: 7 },
+  evidenceButton: { borderWidth: 1, borderColor: '#3A4A5A', borderStyle: 'dashed', borderRadius: 8, padding: 12, marginTop: 12, alignItems: 'center' },
+  evidenceButtonText: { color: '#60A5FA', fontSize: 13, fontWeight: '600' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  modalCancel: { flex: 1, padding: 13, borderRadius: 8, alignItems: 'center', backgroundColor: '#2A3A4A' },
+  modalCancelText: { color: '#B0C4D8', fontWeight: '700' },
+  modalSave: { flex: 1.5, padding: 13, borderRadius: 8, alignItems: 'center', backgroundColor: '#1A73E8' },
+  modalSaveDisabled: { opacity: 0.45 },
+  modalSaveText: { color: '#fff', fontWeight: '700' },
 });

@@ -9,6 +9,7 @@ import type {
   ReceivingSlip,
   AsnOrder,
   ItemRejectionState,
+  InboundScanExceptionInput,
 } from '../types';
 import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
@@ -44,6 +45,7 @@ interface InboundState {
 
   // Item rejection (review step)
   itemRejections: ItemRejectionState;
+  scanExceptions: Record<string, InboundScanExceptionInput>;
 
   // UI state
   isScanning: boolean;
@@ -74,6 +76,8 @@ interface InboundState {
   toggleItemRejection: (sku: string, batchNumber: string, rejected: boolean, reason?: string) => void;
   clearRejections: () => void;
   rejectSlipItems: (slipId: string) => Promise<void>;
+  setScanException: (exception: InboundScanExceptionInput) => void;
+  clearScanExceptions: () => void;
 }
 
 export const useInboundStore = create<InboundState>((set, get) => ({
@@ -90,6 +94,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   selectedAsn: null,
   isFetchingAsns: false,
   itemRejections: {},
+  scanExceptions: {},
 
   // ---------- Start Session ----------
   startSession: async (warehouseId, dockLocation, asnOrderId?) => {
@@ -131,6 +136,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         generatedSlip: null,
         linkedUnitsParents: [],
         itemRejections: {},
+        scanExceptions: {},
         isLoading: false,
       });
     } catch (error: any) {
@@ -240,7 +246,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     // Build the rejection payload from the local rejection state. Rejections
     // are sent with the end-session call so the backend applies them BEFORE
     // finalizing the slip (rejected items never enter stock or put-away).
-    const { itemRejections, linkedUnitsParents } = state;
+    const { itemRejections, linkedUnitsParents, scanExceptions } = state;
     const childIdToSerial = new Map<string, string>();
     const parentIdToSerials = new Map<string, string[]>();
     for (const parent of linkedUnitsParents) {
@@ -282,10 +288,12 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       dock: session.dock_location,
       boxes: session.total_boxes_scanned,
       rejectionsCount: rejections.length,
+      exceptionsCount: Object.keys(scanExceptions).length,
     });
     set({ isLoading: true });
     try {
-      const slip = await inboundService.endSession(session.id, rejections);
+      const exceptions = Object.values(scanExceptions);
+      const slip = await inboundService.endSession(session.id, rejections, exceptions);
       // The end-session response may not include items — fetch the full slip
       let fullSlip = slip;
       if (!slip.items || slip.items.length === 0) {
@@ -303,6 +311,31 @@ export const useInboundStore = create<InboundState>((set, get) => ({
           asn_order_id: session.asn_order_id,
           asn_order_no: session.asn_order_no || undefined,
         };
+      }
+      // Evidence is intentionally uploaded only after the server has created
+      // the immutable exception record for this receipt. A failed attachment
+      // does not roll back the receipt; it remains visible for a retry.
+      const evidenceExceptions = exceptions.filter((exception) => exception.evidence_uri);
+      if (evidenceExceptions.length) {
+        try {
+          const created = await inboundService.getInboundExceptions({
+            warehouse_id: session.warehouse_id,
+          });
+          await Promise.all(
+            evidenceExceptions.map(async (pending) => {
+              const remote = created.find(
+                (exception) =>
+                  exception.slip_id === fullSlip.id &&
+                  exception.qr_identifier === pending.serial_number
+              );
+              if (remote) {
+                await inboundService.uploadInboundExceptionEvidence(remote.id, pending);
+              }
+            })
+          );
+        } catch (e) {
+          console.warn('Inbound evidence upload needs retry:', e);
+        }
       }
       set({
         generatedSlip: fullSlip,
@@ -362,6 +395,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       linkedUnitsParents: [],
       isScanning: false,
       itemRejections: {},
+      scanExceptions: {},
       selectedAsn: null,
     }),
 
@@ -434,6 +468,16 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   },
 
   clearRejections: () => set({ itemRejections: {} }),
+
+  setScanException: (exception) =>
+    set((state) => ({
+      scanExceptions: {
+        ...state.scanExceptions,
+        [exception.serial_number]: exception,
+      },
+    })),
+
+  clearScanExceptions: () => set({ scanExceptions: {} }),
 
   // ---------- Reject Slip Items (after slip creation) ----------
   rejectSlipItems: async (slipId: string) => {

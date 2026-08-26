@@ -8,6 +8,7 @@ import { useInboundStore } from '../store/inboundStore';
 import * as qsealService from '../api/qsealService';
 import { registerVehicleArrival } from '../api/inboundService';
 import { extractQSealSerial } from '../utils/qsealUrl';
+import type { InboundScanExceptionInput } from '../types';
 
 export type InboundStep = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
@@ -34,6 +35,7 @@ export function useInboundFlow() {
     selectedAsn,
     isFetchingAsns,
     itemRejections,
+    setScanException,
     startSession,
     recordScan,
     clearLinkedUnits,
@@ -193,6 +195,20 @@ export function useInboundFlow() {
     }
   };
 
+  const classifyLastScan = (
+    exception: Omit<InboundScanExceptionInput, 'serial_number'>
+  ) => {
+    if (!lastScan) {
+      Alert.alert('No scan selected', 'Scan an item before adding an exception.');
+      return;
+    }
+    setScanException({ ...exception, serial_number: lastScan.qr_identifier });
+    Alert.alert(
+      'Exception saved',
+      `${lastScan.sku} will be routed to ${exception.destination || 'receipt review'} when the session ends.`
+    );
+  };
+
   const handleEndSession = async () => {
     // Do nothing if nothing was scanned — avoid creating empty receiving slips
     const hasScans =
@@ -296,6 +312,7 @@ export function useInboundFlow() {
     handleStartSession,
     handleScan,
     handleViewSummary,
+    classifyLastScan,
     handleEndSession,
     handleNewSession,
     handleCancelSession,

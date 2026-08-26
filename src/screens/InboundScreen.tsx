@@ -50,6 +50,7 @@ export default function InboundScreen() {
         onViewSummary={flow.handleViewSummary}
         onEndSession={flow.handleEndSession}
         onCancel={flow.handleCancelSession}
+        onClassifyLastScan={flow.classifyLastScan}
       />
     );
   }

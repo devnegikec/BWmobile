@@ -15,6 +15,8 @@ import type {
   FloatingItemsResponse,
   ResolveFloatingRequest,
   RejectItemRequest,
+  InboundException,
+  InboundScanExceptionInput,
 } from '../types';
 
 // ---------- Start Scan Session ----------
@@ -56,15 +58,20 @@ export interface RejectionPayload {
 
 export async function endSession(
   sessionId: string,
-  rejections?: RejectionPayload[]
+  rejections?: RejectionPayload[],
+  exceptions?: InboundScanExceptionInput[]
 ): Promise<ReceivingSlip> {
   console.log('[API] endSession called:', {
     sessionId,
     rejectionsCount: rejections?.length || 0,
+    exceptionsCount: exceptions?.length || 0,
   });
   const { data } = await coreClient.post<ReceivingSlip>(
     `/inbound/sessions/${sessionId}/end`,
-    { rejections: rejections || [] }
+    {
+      rejections: rejections || [],
+      exceptions: (exceptions || []).map(({ evidence_uri, evidence_name, evidence_type, ...exception }) => exception),
+    }
   );
   console.log('[API] endSession response:', {
     slipId: data.id,
@@ -73,6 +80,50 @@ export async function endSession(
     asn_order_no: (data as any).asn_order_no || 'NOT IN RESPONSE',
     itemsCount: data.items?.length || 0,
   });
+  return data;
+}
+
+// ---------- Inbound Exceptions / Holds / Quarantine ----------
+export async function getInboundExceptions(params?: {
+  warehouse_id?: string;
+  destination?: 'HOLD' | 'QUARANTINE';
+  status?: string;
+}): Promise<InboundException[]> {
+  const { data } = await coreClient.get<InboundException[]>('/inbound/exceptions', { params });
+  return data;
+}
+
+export async function uploadInboundExceptionEvidence(
+  exceptionId: string,
+  evidence: Pick<InboundScanExceptionInput, 'evidence_uri' | 'evidence_name' | 'evidence_type'>
+): Promise<InboundException> {
+  if (!evidence.evidence_uri) throw new Error('No evidence file selected.');
+  const formData = new FormData();
+  formData.append('file', {
+    uri: evidence.evidence_uri,
+    name: evidence.evidence_name || 'inbound-evidence.jpg',
+    type: evidence.evidence_type || 'image/jpeg',
+  } as any);
+  const { data } = await coreClient.post<InboundException>(
+    `/inbound/exceptions/${exceptionId}/evidence`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  );
+  return data;
+}
+
+export async function disposeInboundException(
+  exceptionId: string,
+  payload: {
+    action: 'release_to_receiving' | 'move_to_hold' | 'move_to_quarantine' | 'return_to_sender' | 'dispose';
+    note?: string;
+    item_id?: string;
+  }
+): Promise<InboundException> {
+  const { data } = await coreClient.post<InboundException>(
+    `/inbound/exceptions/${exceptionId}/disposition`,
+    payload
+  );
   return data;
 }
 
