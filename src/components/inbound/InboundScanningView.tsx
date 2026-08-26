@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import QrScanner from '../QrScanner';
-import type { InboundExceptionClassification, InboundExceptionDestination, InboundScanExceptionInput, InboundSession, ScanRecord } from '../../types';
+import type { AsnReceivingSummary, InboundExceptionClassification, InboundExceptionDestination, InboundScanExceptionInput, InboundSession, ScanRecord } from '../../types';
 
 const REASON_BY_CLASSIFICATION: Record<InboundExceptionClassification, string> = {
   short: 'SHORT_PHYSICAL',
@@ -21,6 +21,8 @@ interface Props {
   isProcessingQSeal: boolean;
   qsealBoxCount: number;
   qsealItemCount: number;
+  reconciliation: AsnReceivingSummary | null;
+  isReconciliationLoading: boolean;
   onScan: (data: string) => void;
   onViewSummary: () => void;
   onEndSession: () => void;
@@ -34,6 +36,8 @@ export default function InboundScanningView({
   isProcessingQSeal,
   qsealBoxCount,
   qsealItemCount,
+  reconciliation,
+  isReconciliationLoading,
   onScan,
   onViewSummary,
   onEndSession,
@@ -109,6 +113,38 @@ export default function InboundScanningView({
           <Text style={styles.scanCountLabel}>boxes</Text>
         </View>
       </View>
+
+      {session.asn_order_id && (
+        <View style={[
+          styles.reconciliationBar,
+          reconciliation?.ready_for_receipt_note && styles.reconciliationReady,
+          reconciliation?.reconciliation_status === 'exception' && styles.reconciliationException,
+        ]}>
+          {isReconciliationLoading && !reconciliation ? (
+            <Text style={styles.reconciliationText}>Refreshing ASN reconciliation…</Text>
+          ) : reconciliation ? (
+            <>
+              <Text style={styles.reconciliationTitle}>
+                {reconciliation.ready_for_receipt_note
+                  ? '✓ Reconciled — Ready for Receipt Note'
+                  : reconciliation.reconciliation_status === 'exception'
+                    ? '⚠ Exception requires review'
+                    : reconciliation.is_partial_receipt
+                      ? `Partial receipt · ${reconciliation.short_total_qty} units remaining`
+                      : 'Scanning in progress'}
+              </Text>
+              <Text style={styles.reconciliationText}>
+                Expected {reconciliation.expected_total_qty} · Scanned {reconciliation.scanned_total_qty} · Accepted {reconciliation.accepted_total_qty}
+              </Text>
+              <Text style={styles.reconciliationText}>
+                Short {reconciliation.short_total_qty} · Excess {reconciliation.excess_total_qty} · Damaged {reconciliation.damaged_total_qty} · Hold {reconciliation.hold_total_qty} · Rejected {reconciliation.rejected_total_qty}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.reconciliationText}>Live reconciliation is unavailable. Continue scanning and try again.</Text>
+          )}
+        </View>
+      )}
 
       {/* QR Scanner */}
       <QrScanner
@@ -262,6 +298,35 @@ const styles = StyleSheet.create({
   scanCountLabel: {
     color: '#8899AA',
     fontSize: 12,
+  },
+  reconciliationBar: {
+    backgroundColor: '#182838',
+    borderWidth: 1,
+    borderColor: '#2A4A62',
+    marginHorizontal: 12,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  reconciliationReady: {
+    backgroundColor: '#173D2B',
+    borderColor: '#2D7A4A',
+  },
+  reconciliationException: {
+    backgroundColor: '#4A3512',
+    borderColor: '#8A621A',
+  },
+  reconciliationTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  reconciliationText: {
+    color: '#B0C4D8',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
   },
   lastScanToast: {
     position: 'absolute',

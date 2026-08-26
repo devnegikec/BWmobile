@@ -1,14 +1,14 @@
 // ============================================================
 // useInboundFlow — Inbound session state + business logic
 // ============================================================
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import * as qsealService from '../api/qsealService';
-import { registerVehicleArrival } from '../api/inboundService';
+import { getAsnReceivingSummary, registerVehicleArrival } from '../api/inboundService';
 import { extractQSealSerial } from '../utils/qsealUrl';
-import type { InboundScanExceptionInput } from '../types';
+import type { AsnReceivingSummary, InboundScanExceptionInput } from '../types';
 
 export type InboundStep = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
@@ -52,6 +52,8 @@ export function useInboundFlow() {
   const [driverName, setDriverName] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
   const [showAsnPicker, setShowAsnPicker] = useState(false);
+  const [reconciliation, setReconciliation] = useState<AsnReceivingSummary | null>(null);
+  const [isReconciliationLoading, setIsReconciliationLoading] = useState(false);
   // Prevent duplicate QSeal scans
   const [scannedQSealSerials, setScannedQSealSerials] = useState<Set<string>>(new Set());
 
@@ -67,6 +69,29 @@ export function useInboundFlow() {
       setStep('idle');
     }
   }, [currentSession, isScanning, generatedSlip]);
+
+  const refreshReconciliation = useCallback(async () => {
+    const activeSession = useInboundStore.getState().currentSession;
+    const asnOrderId = activeSession?.asn_order_id || useInboundStore.getState().selectedAsn?.id;
+    if (!activeSession || !asnOrderId) {
+      setReconciliation(null);
+      return;
+    }
+
+    setIsReconciliationLoading(true);
+    try {
+      const summary = await getAsnReceivingSummary(asnOrderId, activeSession.id);
+      setReconciliation(summary);
+    } catch (error) {
+      console.warn('[Inbound] Failed to refresh live reconciliation:', error);
+    } finally {
+      setIsReconciliationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshReconciliation();
+  }, [currentSession?.id, currentSession?.asn_order_id, refreshReconciliation]);
 
   // ============ HANDLERS ============
 
@@ -92,6 +117,7 @@ export function useInboundFlow() {
         });
       }
       await startSession(selectedWarehouse.id, dockLocation.trim(), selectedAsn?.id);
+      await refreshReconciliation();
       setStep('scanning');
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -111,6 +137,7 @@ export function useInboundFlow() {
           } catch {}
         })
       );
+      await refreshReconciliation();
     }
   };
 
@@ -175,6 +202,7 @@ export function useInboundFlow() {
       console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
       try {
         await recordScan(data);
+        await refreshReconciliation();
         console.log('[Inbound] recordScan SUCCESS');
       } catch (err: any) {
         console.log('[Inbound] recordScan FAILED:', {
@@ -248,6 +276,7 @@ export function useInboundFlow() {
     setVehicleNumber('');
     setDriverName('');
     setShowAsnPicker(false);
+    setReconciliation(null);
     setScannedQSealSerials(new Set());
     setStep('idle');
   };
@@ -268,6 +297,7 @@ export function useInboundFlow() {
             setVehicleNumber('');
             setDriverName('');
             setShowAsnPicker(false);
+            setReconciliation(null);
             setScannedQSealSerials(new Set());
             setStep('idle');
           },
@@ -308,6 +338,8 @@ export function useInboundFlow() {
     selectedAsn,
     isFetchingAsns,
     isLoading,
+    reconciliation,
+    isReconciliationLoading,
     // Actions
     handleStartSession,
     handleScan,

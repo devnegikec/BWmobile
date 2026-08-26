@@ -642,8 +642,13 @@ export interface AsnReceivingSummary {
   asn_order_no: string;
   asn_status: string;
   expected_total_qty: number;
+  scanned_total_qty: number;
   accepted_total_qty: number;
   rejected_total_qty: number;
+  short_total_qty: number;
+  excess_total_qty: number;
+  damaged_total_qty: number;
+  hold_total_qty: number;
   pending_total_qty: number;
   over_total_qty: number;
   total_line_items: number;
@@ -651,6 +656,11 @@ export interface AsnReceivingSummary {
   partial_items: number;
   not_received_items: number;
   over_items: number;
+  reconciliation_status: 'pending' | 'partial' | 'exception' | 'reconciled';
+  ready_for_receipt_note: boolean;
+  is_partial_receipt: boolean;
+  unresolved_exception_count: number;
+  active_session_id?: string | null;
   linked_slips: AsnLinkedSlip[];
   line_items: AsnSummaryLineItem[];
 }
@@ -671,11 +681,16 @@ export interface AsnSummaryLineItem {
   sku: string;
   item_name: string;
   expected_qty: number;
+  scanned_qty: number;
   accepted_qty: number;
   rejected_qty: number;
+  short_qty: number;
+  excess_qty: number;
+  damaged_qty: number;
+  hold_qty: number;
   pending_qty: number;
   over_qty: number;
-  status: 'matched' | 'partial' | 'not_received' | 'over';
+  status: 'matched' | 'partial' | 'not_received' | 'over' | 'exception' | 'not_applicable';
 }
 
 // ---------- Floating Items ----------

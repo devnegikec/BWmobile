@@ -190,9 +190,10 @@ export async function getAsnOrders(params?: {
 }
 
 // ---------- ASN: Get Receiving Summary ----------
-export async function getAsnReceivingSummary(asnOrderId: string): Promise<AsnReceivingSummary> {
+export async function getAsnReceivingSummary(asnOrderId: string, sessionId?: string): Promise<AsnReceivingSummary> {
   const { data } = await coreClient.get<AsnReceivingSummary>(
-    `/asn-orders/${asnOrderId}/receiving-summary`
+    `/asn-orders/${asnOrderId}/receiving-summary`,
+    { params: sessionId ? { session_id: sessionId } : undefined }
   );
   return data;
 }
