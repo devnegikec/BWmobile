@@ -17,10 +17,6 @@ export default function InboundScreen() {
         warehouseName={flow.selectedWarehouse?.name || ''}
         dockLocation={flow.dockLocation}
         onDockLocationChange={flow.setDockLocation}
-        vehicleNumber={flow.vehicleNumber}
-        onVehicleNumberChange={flow.setVehicleNumber}
-        driverName={flow.driverName}
-        onDriverNameChange={flow.setDriverName}
         selectedAsn={flow.selectedAsn}
         availableAsns={flow.availableAsns}
         isFetchingAsns={flow.isFetchingAsns}

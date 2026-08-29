@@ -6,7 +6,7 @@ import { Alert } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import * as qsealService from '../api/qsealService';
-import { getAsnReceivingSummary, registerVehicleArrival } from '../api/inboundService';
+import { getAsnReceivingSummary, cancelInboundSession } from '../api/inboundService';
 import { extractQSealSerial } from '../utils/qsealUrl';
 import type { AsnReceivingSummary, InboundScanExceptionInput } from '../types';
 
@@ -48,8 +48,6 @@ export function useInboundFlow() {
 
   const [step, setStep] = useState<InboundStep>('idle');
   const [dockLocation, setDockLocation] = useState('');
-  const [vehicleNumber, setVehicleNumber] = useState('');
-  const [driverName, setDriverName] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
   const [showAsnPicker, setShowAsnPicker] = useState(false);
   const [reconciliation, setReconciliation] = useState<AsnReceivingSummary | null>(null);
@@ -104,22 +102,40 @@ export function useInboundFlow() {
       Alert.alert('Error', 'Please enter a dock location.');
       return;
     }
-    try {
+
+    const doStart = async () => {
       clearLinkedUnits();
-      // HC-03: register vehicle arrival (optional) before starting unloading
-      if (vehicleNumber.trim()) {
-        await registerVehicleArrival({
-          vehicle_no: vehicleNumber.trim(),
-          driver_name: driverName.trim() || undefined,
-          warehouse_id: selectedWarehouse.id,
-          dock: dockLocation.trim(),
-          asn_order_ids: selectedAsn?.id ? [selectedAsn.id] : [],
-        });
-      }
       await startSession(selectedWarehouse.id, dockLocation.trim(), selectedAsn?.id);
       await refreshReconciliation();
       setStep('scanning');
+    };
+
+    try {
+      await doStart();
     } catch (err: any) {
+      const existingSessionId = err?.existingSessionId;
+      if (existingSessionId) {
+        Alert.alert(
+          'Session Already Active',
+          'An open scan session already exists for this ASN. Cancel the previous session and start a fresh one?',
+          [
+            { text: 'Keep Existing', style: 'cancel' },
+            {
+              text: 'Cancel & Start Fresh',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await cancelInboundSession(existingSessionId);
+                  await doStart();
+                } catch (retryErr: any) {
+                  Alert.alert('Error', retryErr?.message || 'Failed to start session.');
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
       Alert.alert('Error', err.message);
     }
   };
@@ -273,8 +289,6 @@ export function useInboundFlow() {
     clearSession();
     clearLinkedUnits();
     setDockLocation('');
-    setVehicleNumber('');
-    setDriverName('');
     setShowAsnPicker(false);
     setReconciliation(null);
     setScannedQSealSerials(new Set());
@@ -294,8 +308,6 @@ export function useInboundFlow() {
             clearSession();
             clearLinkedUnits();
             setDockLocation('');
-            setVehicleNumber('');
-            setDriverName('');
             setShowAsnPicker(false);
             setReconciliation(null);
             setScannedQSealSerials(new Set());
@@ -320,10 +332,6 @@ export function useInboundFlow() {
     // Form state
     dockLocation,
     setDockLocation,
-    vehicleNumber,
-    setVehicleNumber,
-    driverName,
-    setDriverName,
     isProcessingQSeal,
     showAsnPicker,
     setShowAsnPicker,

@@ -94,6 +94,8 @@ export interface InboundSession {
   created_at: string;
   asn_order_id?: string | null;
   asn_order_no?: string | null;
+  vehicle_arrival_id?: string | null;
+  vehicle_no?: string | null;
 }
 
 export interface StartSessionRequest {

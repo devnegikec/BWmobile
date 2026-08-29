@@ -142,6 +142,13 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     } catch (error: any) {
       const status = error.response?.status;
       const detail = getBackendErrorMessage(error);
+      // The backend returns structured details with the conflicting open
+      // session id so the UI can offer to cancel it and start fresh.
+      const details = error.response?.data?.details;
+      const existingSessionId =
+        Array.isArray(details)
+          ? details.find((d: any) => d?.existing_session_id)?.existing_session_id
+          : undefined;
       let message = 'Failed to start session.';
 
       if (status === 403) {
@@ -154,7 +161,10 @@ export const useInboundStore = create<InboundState>((set, get) => ({
 
       console.error('startSession failed:', { status, detail, message });
       set({ isLoading: false, error: message });
-      throw new Error(message);
+      const enriched = new Error(message) as Error & { existingSessionId?: string; status?: number };
+      enriched.existingSessionId = existingSessionId;
+      enriched.status = status;
+      throw enriched;
     }
   },
 
@@ -408,10 +418,14 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     try {
       const response = await inboundService.getAsnOrders({
         warehouse_id: warehouseId,
+        page: 1,
         page_size: 50,
+        sort_by: 'created_at',
+        sort_order: 'desc',
       });
       // Response key might be 'asn_orders' or 'items'
       const allOrders = (response as any).asn_orders || (response as any).items || [];
+      console.log('[ASN] fetchAsnOrders — total fetched:', allOrders.length, allOrders);
       // Only show confirmed or partially_delivered ASNs (filter out drafts)
       const orders = allOrders.filter(
         (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'

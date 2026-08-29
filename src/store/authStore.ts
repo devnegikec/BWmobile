@@ -193,7 +193,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // If this fails with 401, the interceptor clears tokens and triggers logout
       try {
         const warehouses = await authService.getMyWarehouses();
-        set({ isAuthenticated: true, warehouses });
+        const defaultWarehouse =
+          warehouses.find((w) => w.is_default) || warehouses[0] || null;
+        set({
+          isAuthenticated: true,
+          warehouses,
+          selectedWarehouse: defaultWarehouse,
+        });
       } catch (err: any) {
         // 401 = token invalid/expired, let interceptor handle cleanup
         if (err?.response?.status === 401) {

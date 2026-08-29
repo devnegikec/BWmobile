@@ -107,6 +107,9 @@ export default function InboundScanningView({
           {session.asn_order_no && (
             <Text style={styles.sessionAsn}>📋 {session.asn_order_no}</Text>
           )}
+          {session.vehicle_no && (
+            <Text style={styles.sessionVehicle}>🚚 {session.vehicle_no}</Text>
+          )}
         </View>
         <View style={styles.scanCount}>
           <Text style={styles.scanCountNum}>{session.total_boxes_scanned}</Text>
@@ -283,6 +286,12 @@ const styles = StyleSheet.create({
   },
   sessionAsn: {
     color: '#60A5FA',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  sessionVehicle: {
+    color: '#34D399',
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,

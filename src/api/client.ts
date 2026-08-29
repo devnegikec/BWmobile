@@ -2,21 +2,36 @@
 // API Client — Axios instance with JWT interceptors
 // ============================================================
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
-// Base URLs — Railway-deployed microservices (bypass legacy gateway)
-// All values sourced from .env (EXPO_PUBLIC_*), with fallbacks for safety.
+// Base URLs — sourced from .env (EXPO_PUBLIC_*). When unset, fall back to
+// locally hosted services. On a physical phone, `localhost` points at the phone
+// itself, so we auto-detect the dev machine's LAN IP from Expo's hostUri and
+// use it as the host (e.g. http://192.168.1.10:8001/api/v1).
+function resolveDevHost(): string | null {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as unknown as { expoGoConfig?: { debuggerHost?: string } })
+      .expoGoConfig?.debuggerHost ||
+    (Constants as unknown as { manifest?: { debuggerHost?: string } })
+      .manifest?.debuggerHost;
+  if (!hostUri) return null;
+  return hostUri.replace(/^https?:\/\//, '').split(':')[0] || null;
+}
+
+const DEV_HOST = resolveDevHost();
+
 const IDENTITY_BASE_URL =
   process.env.EXPO_PUBLIC_IDENTITY_URL ||
-  'http://localhost:8000/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8000/api/v1` : 'http://localhost:8000/api/v1');
 const CORE_BASE_URL =
   process.env.EXPO_PUBLIC_CORE_URL ||
-  'http://localhost:8001/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8001/api/v1` : 'http://localhost:8001/api/v1');
 export const SEARCH_BASE_URL =
   process.env.EXPO_PUBLIC_SEARCH_URL ||
-  'http://localhost:8002/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8002/api/v1` : 'http://localhost:8002/api/v1');
 
 // ---------- Request timeout (ms) ----------
 const REQUEST_TIMEOUT = Number(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT) || 15000;

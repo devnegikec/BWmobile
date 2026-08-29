@@ -50,6 +50,14 @@ export async function getSessionSummary(sessionId: string): Promise<SessionSumma
   return data;
 }
 
+// ---------- Cancel Session (discard scans, no slip generated) ----------
+export async function cancelInboundSession(sessionId: string): Promise<InboundSession> {
+  const { data } = await coreClient.post<InboundSession>(
+    `/inbound/sessions/${sessionId}/cancel`
+  );
+  return data;
+}
+
 // ---------- End Session (Generate Receiving Slip) ----------
 export interface RejectionPayload {
   serial_number: string;
@@ -181,11 +189,14 @@ export async function getAsnOrders(params?: {
   warehouse_id?: string;
   page?: number;
   page_size?: number;
+  sort_by?: string;
+  sort_order?: string;
 }): Promise<PaginatedResponse<AsnOrder>> {
   const { data } = await coreClient.get<PaginatedResponse<AsnOrder>>(
     '/asn-orders',
     { params }
   );
+  console.log('[API] getAsnOrders — fetched:', params);
   return data;
 }
 
