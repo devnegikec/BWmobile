@@ -159,7 +159,26 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         message = detail;
       }
 
-      console.error('startSession failed:', { status, detail, message });
+      if (existingSessionId) {
+        // Expected, handled case — the UI will offer to cancel the old
+        // session and start fresh. Log as a warning, not an error.
+        console.warn('[Store] startSession — open session exists, offering cancel:', {
+          existingSessionId,
+          requestUrl: error.config?.url,
+          requestBaseURL: error.config?.baseURL,
+          responseDetails: details,
+        });
+      } else {
+        console.error('startSession failed:', {
+          status,
+          detail,
+          message,
+          responseData: error.response?.data,
+          responseDetails: details,
+          requestUrl: error.config?.url,
+          requestBaseURL: error.config?.baseURL,
+        });
+      }
       set({ isLoading: false, error: message });
       const enriched = new Error(message) as Error & { existingSessionId?: string; status?: number };
       enriched.existingSessionId = existingSessionId;
@@ -425,7 +444,6 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       });
       // Response key might be 'asn_orders' or 'items'
       const allOrders = (response as any).asn_orders || (response as any).items || [];
-      console.log('[ASN] fetchAsnOrders — total fetched:', allOrders.length, allOrders);
       // Only show confirmed or partially_delivered ASNs (filter out drafts)
       const orders = allOrders.filter(
         (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'

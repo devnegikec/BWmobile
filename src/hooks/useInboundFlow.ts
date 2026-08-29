@@ -114,7 +114,13 @@ export function useInboundFlow() {
       await doStart();
     } catch (err: any) {
       const existingSessionId = err?.existingSessionId;
+      console.log('[Inbound] handleStartSession error:', {
+        existingSessionId: existingSessionId || 'NOT EXTRACTED',
+        status: err?.status,
+        message: err?.message,
+      });
       if (existingSessionId) {
+        console.log('[Inbound] Showing cancel-and-start-fresh prompt for session:', existingSessionId);
         Alert.alert(
           'Session Already Active',
           'An open scan session already exists for this ASN. Cancel the previous session and start a fresh one?',
@@ -125,9 +131,16 @@ export function useInboundFlow() {
               style: 'destructive',
               onPress: async () => {
                 try {
+                  console.log('[Inbound] Cancelling previous session:', existingSessionId);
                   await cancelInboundSession(existingSessionId);
+                  console.log('[Inbound] Previous session cancelled — starting fresh session.');
                   await doStart();
                 } catch (retryErr: any) {
+                  console.error('[Inbound] Cancel/retry failed:', {
+                    status: retryErr?.response?.status,
+                    data: retryErr?.response?.data,
+                    message: retryErr?.message,
+                  });
                   Alert.alert('Error', retryErr?.message || 'Failed to start session.');
                 }
               },
