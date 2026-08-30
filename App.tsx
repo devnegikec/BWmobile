@@ -21,7 +21,7 @@ export default function App() {
       setIsReady(true);
     }
     init();
-  }, []);
+  }, [checkAuth]);
 
   if (!isReady) {
     return (

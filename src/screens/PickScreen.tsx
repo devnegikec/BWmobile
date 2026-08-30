@@ -1,7 +1,7 @@
 // ============================================================
 // Pick Screen — List, scan and complete pick lists (reverse of put-away)
 // ============================================================
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -55,9 +55,9 @@ export default function PickScreen() {
     const [viewMode, setViewMode] = useState<ViewMode>('list');
     const [lists, setLists] = useState<PickListSummary[]>([]);
     const [selectedList, setSelectedList] = useState<PickList | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const [, setIsLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [, setError] = useState<string | null>(null);
 
     // Scan state
     const [scanText, setScanText] = useState('');
@@ -86,7 +86,7 @@ export default function PickScreen() {
                 (l) => l.status === 'draft' || l.status === 'in_progress',
             );
             setLists(active);
-        } catch (err: any) {
+        } catch {
             setError('Failed to load pick lists.');
         }
     }, [selectedWarehouse]);
@@ -108,7 +108,7 @@ export default function PickScreen() {
             const detail = await pickService.getPickList(list.id);
             setSelectedList(detail);
             setViewMode('detail');
-        } catch (err: any) {
+        } catch {
             Alert.alert('Error', 'Failed to load pick list details.');
         } finally {
             setIsLoading(false);
@@ -265,7 +265,11 @@ export default function PickScreen() {
     const toggleGroup = (key: string) => {
         setExpandedGroups((prev) => {
             const next = new Set(prev);
-            next.has(key) ? next.delete(key) : next.add(key);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
             return next;
         });
     };

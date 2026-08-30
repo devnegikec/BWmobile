@@ -70,7 +70,7 @@ function extractSerial(data: string): { serial: string; isParent: boolean } | nu
 }
 
 export default function QsealCascadeScreen({ navigation }: any) {
-  const { user, worker, selectedWarehouse } = useAuthStore();
+  const { user, worker } = useAuthStore();
   // Try multiple sources for organization_id
   const orgId = user?.organization_id || worker?.organization_id || '';
   console.log('[QSealCascade] orgId sources:', {

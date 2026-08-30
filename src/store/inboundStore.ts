@@ -10,8 +10,8 @@ import type {
   AsnOrder,
   ItemRejectionState,
   InboundScanExceptionInput,
+  QSealParentWithUnits,
 } from '../types';
-import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
 import * as qsealService from '../api/qsealService';
 
@@ -442,6 +442,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       let page = 1;
       let hasNext = true;
 
+      /* eslint-disable no-await-in-loop -- paginate through every ASN page */
       while (hasNext) {
         const response: any = await inboundService.getAsnOrders({
           warehouse_id: warehouseId,
@@ -459,6 +460,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         // Safety cap — never loop unbounded.
         if (page > 100) break;
       }
+      /* eslint-enable no-await-in-loop */
 
       // Only show confirmed or partially_delivered ASNs (filter out drafts)
       const orders = collected.filter(

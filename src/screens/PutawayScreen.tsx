@@ -53,15 +53,15 @@ function Header({ title, subtitle, onBack }: { title: string; subtitle?: string;
 
 export default function PutawayScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { selectedWarehouse, worker } = useAuthStore();
+  const { selectedWarehouse } = useAuthStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [lists, setLists] = useState<PutAwayList[]>([]);
   const [selectedList, setSelectedList] = useState<PutAwayList | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   const [assigningAll, setAssigningAll] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -82,7 +82,7 @@ export default function PutawayScreen() {
         page_size: 50,
       });
       setLists(response.put_away_lists || []);
-    } catch (err: any) {
+    } catch {
       setError('Failed to load put-away lists.');
     }
   }, [selectedWarehouse]);
@@ -104,7 +104,7 @@ export default function PutawayScreen() {
       const detail = await putawayService.getPutAwayList(list.id);
       setSelectedList(detail);
       setViewMode('detail');
-    } catch (err: any) {
+    } catch {
       Alert.alert('Error', 'Failed to load put-away details.');
     } finally {
       setIsLoading(false);
@@ -153,13 +153,14 @@ export default function PutawayScreen() {
     const pending = group.children.filter((c) => c.status === 'pending');
     if (pending.length === 0) return;
     setAssigningAll(true);
-    const completedIds: string[] = [];
-    for (const item of pending) {
-      try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
-        completedIds.push(item.id);
-      } catch {}
-    }
+    const results = await Promise.allSettled(
+      pending.map((item) =>
+        putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id)
+      )
+    );
+    const completedIds = pending
+      .filter((_, i) => results[i].status === 'fulfilled')
+      .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
   };
@@ -173,13 +174,14 @@ export default function PutawayScreen() {
       return;
     }
     setAssigningAll(true);
-    const completedIds: string[] = [];
-    for (const item of pending) {
-      try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, locationId);
-        completedIds.push(item.id);
-      } catch {}
-    }
+    const results = await Promise.allSettled(
+      pending.map((item) =>
+        putawayService.completePutAwayItem(selectedList.id, item.id, locationId)
+      )
+    );
+    const completedIds = pending
+      .filter((_, i) => results[i].status === 'fulfilled')
+      .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, binLabel);
     Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
@@ -189,7 +191,11 @@ export default function PutawayScreen() {
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };
@@ -215,7 +221,7 @@ export default function PutawayScreen() {
           ),
         };
       });
-    } catch (err: any) {
+    } catch {
       Alert.alert('Error', 'Failed to skip item.');
     } finally {
       setSkipModalVisible(false);

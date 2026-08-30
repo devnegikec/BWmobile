@@ -30,16 +30,9 @@ export default function DashboardScreen({ navigation }: any) {
     if (!isAuthenticated || (!user && !worker)) {
       logout();
     }
-  }, [isAuthenticated, user, worker]);
+  }, [isAuthenticated, user, worker, logout]);
 
   const displayName = user?.display_name || worker?.display_name || 'User';
-
-  useEffect(() => {
-    // Load warehouses as fallback (e.g., for password-login users)
-    if (warehouses.length === 0 && !selectedWarehouse) {
-      loadWarehousesWrapper();
-    }
-  }, []);
 
   const loadWarehousesWrapper = async () => {
     setLoadingWarehouses(true);
@@ -52,6 +45,14 @@ export default function DashboardScreen({ navigation }: any) {
       setLoadingWarehouses(false);
     }
   };
+
+  // Load warehouses once on mount if not already loaded.
+  useEffect(() => {
+    if (warehouses.length === 0 && !selectedWarehouse) {
+      loadWarehousesWrapper();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional run-once-on-mount
+  }, []);
 
   const handleLogout = async () => {
     await logout();

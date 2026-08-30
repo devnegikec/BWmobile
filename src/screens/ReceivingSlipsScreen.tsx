@@ -15,13 +15,12 @@ import {
 import { useAuthStore } from '../store/authStore';
 import * as inboundService from '../api/inboundService';
 import * as putawayService from '../api/putawayService';
-import type { ReceivingSlip, PutAwayList } from '../types';
+import type { ReceivingSlip } from '../types';
 
 export default function ReceivingSlipsScreen({ navigation }: any) {
   const { selectedWarehouse, worker } = useAuthStore();
 
   const [slips, setSlips] = useState<ReceivingSlip[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
 

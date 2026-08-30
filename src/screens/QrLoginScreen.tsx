@@ -15,11 +15,9 @@ import { useAuthStore } from '../store/authStore';
 
 export default function QrLoginScreen({ navigation }: any) {
   const { loginWithQRCode, isLoading } = useAuthStore();
-  const [scanResult, setScanResult] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const handleScan = async (data: string) => {
-    setScanResult(data);
     setLoginError(null);
     try {
       // The QR code contains the worker's unique qr_code string
@@ -27,8 +25,6 @@ export default function QrLoginScreen({ navigation }: any) {
       // Navigation will happen automatically via auth state change
     } catch (err: any) {
       setLoginError(err.message);
-      // Allow rescanning
-      setScanResult(null);
     }
   };
 
@@ -71,7 +67,7 @@ export default function QrLoginScreen({ navigation }: any) {
       {/* Manual entry fallback */}
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          Can't scan? Contact your supervisor.
+          Can&apos;t scan? Contact your supervisor.
         </Text>
       </View>
     </View>

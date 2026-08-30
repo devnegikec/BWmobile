@@ -512,17 +512,6 @@ export interface BinQRPayload {
   location_code: string;
 }
 
-// ---------- ASN Order ----------
-export interface AsnOrder {
-  id: string;
-  asn_order_no: string;
-  supplier_name: string;
-  status: 'draft' | 'confirmed' | 'partially_delivered' | 'delivered' | 'closed';
-  expected_boxes: number;
-  expected_items: number;
-  created_at: string;
-}
-
 // ---------- QSeal ----------
 export interface QSealScanRequest {
   serial_number: string;

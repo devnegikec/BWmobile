@@ -172,6 +172,9 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
     else await processChild(data, serial);
 
     scanLockRef.current = false;
+    // processParent/processChild intentionally omitted — they only read stable
+    // orgId/warehouseId, which are already deps of this callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, warehouseId, scannedSerials]);
 
   // ── Ensure a direct put-away list exists for this session ──
@@ -274,7 +277,11 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
   const toggleExpand = (key: string) => {
     setExpandedBoxes((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };

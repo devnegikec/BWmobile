@@ -2,7 +2,7 @@
 // App Navigator — Stack & Tab navigation setup
 // ============================================================
 import React from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { Text as RNText } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -162,8 +162,6 @@ function AppTabs() {
 }
 
 // Simple text-based tab icon
-import { Text as RNText } from 'react-native';
-
 function TabIcon({ label }: { label: string; color: string }) {
   return <RNText style={{ fontSize: 20 }}>{label}</RNText>;
 }
