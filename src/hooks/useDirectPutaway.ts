@@ -55,7 +55,15 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       const parent = await qsealService.getLinkedUnits(node.node_id);
       const units = parent.linked_units || [];
 
-      setScannedSerials((prev) => new Set(prev).add(serial));
+      setScannedSerials((prev) => {
+        const next = new Set(prev).add(serial);
+        // Mark every child serial as scanned too, so scanning a child again
+        // won't create a second assignment row for the same item.
+        for (const unit of units) {
+          if (unit.serial_number) next.add(unit.serial_number);
+        }
+        return next;
+      });
 
       const boxKey = `box-${node.node_id}`;
       const boxRow: TableRow = {

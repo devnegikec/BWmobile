@@ -249,6 +249,14 @@ export default function AssignBinScreen() {
       .filter((msg): msg is string => msg !== null);
 
     if (failed.length > 0) {
+      // Keep only the failed items so a retry doesn't re-add stock for items
+      // that already succeeded (addStockToBin is additive).
+      const failedIndexes = new Set(
+        results
+          .map((result, i) => (result.status === 'rejected' ? i : -1))
+          .filter((i) => i >= 0)
+      );
+      setItems((prev) => prev.filter((_, i) => failedIndexes.has(i)));
       setError(`Some items failed:\n${failed.join('\n')}`);
       setPhase('review');
       return;
