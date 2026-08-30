@@ -2,21 +2,48 @@
 // API Client — Axios instance with JWT interceptors
 // ============================================================
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
-// Base URLs — Railway-deployed microservices (bypass legacy gateway)
-// All values sourced from .env (EXPO_PUBLIC_*), with fallbacks for safety.
+// Base URLs — sourced from .env (EXPO_PUBLIC_*). When unset, fall back to
+// locally hosted services. On a physical phone, `localhost` points at the phone
+// itself, so we auto-detect the dev machine's LAN IP from Expo's hostUri and
+// use it as the host (e.g. http://192.168.1.10:8001/api/v1).
+function resolveDevHost(): string | null {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as unknown as { expoGoConfig?: { debuggerHost?: string } })
+      .expoGoConfig?.debuggerHost ||
+    (Constants as unknown as { manifest?: { debuggerHost?: string } })
+      .manifest?.debuggerHost;
+  if (!hostUri) return null;
+
+  // hostUri looks like `192.168.1.10:8081` (IPv4) or `[2001:db8::1]:8081`
+  // (IPv6). Strip the scheme, then handle a bracketed IPv6 literal before
+  // falling back to the `host:port` split used for IPv4.
+  const withoutScheme = hostUri.replace(/^https?:\/\//, '');
+
+  if (withoutScheme.startsWith('[')) {
+    const close = withoutScheme.indexOf(']');
+    if (close !== -1) return withoutScheme.slice(1, close) || null;
+    return withoutScheme.slice(1) || null;
+  }
+
+  return withoutScheme.split(':')[0] || null;
+}
+
+const DEV_HOST = resolveDevHost();
+
 const IDENTITY_BASE_URL =
   process.env.EXPO_PUBLIC_IDENTITY_URL ||
-  'https://identity-service-production-a1eb.up.railway.app/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8000/api/v1` : 'http://localhost:8000/api/v1');
 const CORE_BASE_URL =
   process.env.EXPO_PUBLIC_CORE_URL ||
-  'https://core-service-production-66e9.up.railway.app/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8001/api/v1` : 'http://localhost:8001/api/v1');
 export const SEARCH_BASE_URL =
   process.env.EXPO_PUBLIC_SEARCH_URL ||
-  'https://420a-2401-4900-619a-4bf0-89c0-e9f1-13b8-73fc.ngrok-free.app/api/v1';
+  (DEV_HOST ? `http://${DEV_HOST}:8002/api/v1` : 'http://localhost:8002/api/v1');
 
 // ---------- Request timeout (ms) ----------
 const REQUEST_TIMEOUT = Number(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT) || 15000;

@@ -9,10 +9,27 @@ import type {
   ReceivingSlip,
   AsnOrder,
   ItemRejectionState,
+  InboundScanExceptionInput,
 } from '../types';
 import type { QSealParentWithUnits } from '../types';
 import * as inboundService from '../api/inboundService';
 import * as qsealService from '../api/qsealService';
+
+// ---- Extract the real backend error message. The core-service returns
+// ---- `message` (custom ValidationError) or `detail` (HTTPException / nested),
+// ---- so check all shapes. Returns '' when nothing is available.
+function getBackendErrorMessage(err: any): string {
+  const data = err?.response?.data;
+  const detail = data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    return detail.message || detail.error || '';
+  }
+  if (data && typeof data.message === 'string' && data.message.trim()) {
+    return data.message;
+  }
+  return '';
+}
 
 interface InboundState {
   // Current session
@@ -28,6 +45,7 @@ interface InboundState {
 
   // Item rejection (review step)
   itemRejections: ItemRejectionState;
+  scanExceptions: Record<string, InboundScanExceptionInput>;
 
   // UI state
   isScanning: boolean;
@@ -58,6 +76,8 @@ interface InboundState {
   toggleItemRejection: (sku: string, batchNumber: string, rejected: boolean, reason?: string) => void;
   clearRejections: () => void;
   rejectSlipItems: (slipId: string) => Promise<void>;
+  setScanException: (exception: InboundScanExceptionInput) => void;
+  clearScanExceptions: () => void;
 }
 
 export const useInboundStore = create<InboundState>((set, get) => ({
@@ -74,6 +94,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   selectedAsn: null,
   isFetchingAsns: false,
   itemRejections: {},
+  scanExceptions: {},
 
   // ---------- Start Session ----------
   startSession: async (warehouseId, dockLocation, asnOrderId?) => {
@@ -115,11 +136,19 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         generatedSlip: null,
         linkedUnitsParents: [],
         itemRejections: {},
+        scanExceptions: {},
         isLoading: false,
       });
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
+      // The backend returns structured details with the conflicting open
+      // session id so the UI can offer to cancel it and start fresh.
+      const details = error.response?.data?.details;
+      const existingSessionId =
+        Array.isArray(details)
+          ? details.find((d: any) => d?.existing_session_id)?.existing_session_id
+          : undefined;
       let message = 'Failed to start session.';
 
       if (status === 403) {
@@ -130,9 +159,31 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         message = detail;
       }
 
-      console.error('startSession failed:', { status, detail, message });
+      if (existingSessionId) {
+        // Expected, handled case — the UI will offer to cancel the old
+        // session and start fresh. Log as a warning, not an error.
+        console.warn('[Store] startSession — open session exists, offering cancel:', {
+          existingSessionId,
+          requestUrl: error.config?.url,
+          requestBaseURL: error.config?.baseURL,
+          responseDetails: details,
+        });
+      } else {
+        console.error('startSession failed:', {
+          status,
+          detail,
+          message,
+          responseData: error.response?.data,
+          responseDetails: details,
+          requestUrl: error.config?.url,
+          requestBaseURL: error.config?.baseURL,
+        });
+      }
       set({ isLoading: false, error: message });
-      throw new Error(message);
+      const enriched = new Error(message) as Error & { existingSessionId?: string; status?: number };
+      enriched.existingSessionId = existingSessionId;
+      enriched.status = status;
+      throw enriched;
     }
   },
 
@@ -165,7 +216,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       });
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
       let message = 'Duplicate scan or invalid QR.';
 
       if (status === 403) {
@@ -217,18 +268,61 @@ export const useInboundStore = create<InboundState>((set, get) => ({
 
   // ---------- End Session ----------
   endSession: async () => {
-    const session = get().currentSession;
+    const state = get();
+    const session = state.currentSession;
     if (!session) throw new Error('No active session.');
+
+    // Build the rejection payload from the local rejection state. Rejections
+    // are sent with the end-session call so the backend applies them BEFORE
+    // finalizing the slip (rejected items never enter stock or put-away).
+    const { itemRejections, linkedUnitsParents, scanExceptions } = state;
+    const childIdToSerial = new Map<string, string>();
+    const parentIdToSerials = new Map<string, string[]>();
+    for (const parent of linkedUnitsParents) {
+      const units = parent.linked_units || [];
+      parentIdToSerials.set(
+        parent.id,
+        units.map((u) => u.serial_number).filter((s): s is string => !!s)
+      );
+      for (const unit of units) {
+        if (unit.serial_number) childIdToSerial.set(unit.id, unit.serial_number);
+      }
+    }
+    const serialReasons = new Map<string, string>();
+    for (const [key, val] of Object.entries(itemRejections)) {
+      if (!val || !val.rejected) continue;
+      const reason = val.reason || 'Rejected during review';
+      if (key.startsWith('qseal-parent||')) {
+        const pid = key.slice('qseal-parent||'.length);
+        for (const s of parentIdToSerials.get(pid) || []) {
+          serialReasons.set(s, reason);
+        }
+      } else if (key.startsWith('qseal-child||')) {
+        const cid = key.slice('qseal-child||'.length);
+        const s = childIdToSerial.get(cid);
+        if (s) serialReasons.set(s, reason);
+      } else if (!key.includes('||')) {
+        // Pure serial-number key (child rejection stores this directly).
+        serialReasons.set(key, reason);
+      }
+    }
+    const rejections = Array.from(serialReasons.entries()).map(
+      ([serial_number, reason]) => ({ serial_number, reason })
+    );
+
     console.log('[Store] endSession — current session ASN details:', {
       sessionId: session.id,
       asn_order_id: session.asn_order_id || 'NOT SET',
       asn_order_no: session.asn_order_no || 'NOT SET',
       dock: session.dock_location,
       boxes: session.total_boxes_scanned,
+      rejectionsCount: rejections.length,
+      exceptionsCount: Object.keys(scanExceptions).length,
     });
     set({ isLoading: true });
     try {
-      const slip = await inboundService.endSession(session.id);
+      const exceptions = Object.values(scanExceptions);
+      const slip = await inboundService.endSession(session.id, rejections, exceptions);
       // The end-session response may not include items — fetch the full slip
       let fullSlip = slip;
       if (!slip.items || slip.items.length === 0) {
@@ -247,6 +341,31 @@ export const useInboundStore = create<InboundState>((set, get) => ({
           asn_order_no: session.asn_order_no || undefined,
         };
       }
+      // Evidence is intentionally uploaded only after the server has created
+      // the immutable exception record for this receipt. A failed attachment
+      // does not roll back the receipt; it remains visible for a retry.
+      const evidenceExceptions = exceptions.filter((exception) => exception.evidence_uri);
+      if (evidenceExceptions.length) {
+        try {
+          const created = await inboundService.getInboundExceptions({
+            warehouse_id: session.warehouse_id,
+          });
+          await Promise.all(
+            evidenceExceptions.map(async (pending) => {
+              const remote = created.find(
+                (exception) =>
+                  exception.slip_id === fullSlip.id &&
+                  exception.qr_identifier === pending.serial_number
+              );
+              if (remote) {
+                await inboundService.uploadInboundExceptionEvidence(remote.id, pending);
+              }
+            })
+          );
+        } catch (e) {
+          console.warn('Inbound evidence upload needs retry:', e);
+        }
+      }
       set({
         generatedSlip: fullSlip,
         isScanning: false,
@@ -255,7 +374,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       return fullSlip;
     } catch (error: any) {
       const status = error.response?.status;
-      const detail = error.response?.data?.detail || '';
+      const detail = getBackendErrorMessage(error);
       const responseData = error.response?.data;
       let message = 'Failed to end session.';
 
@@ -305,6 +424,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
       linkedUnitsParents: [],
       isScanning: false,
       itemRejections: {},
+      scanExceptions: {},
       selectedAsn: null,
     }),
 
@@ -315,14 +435,33 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   fetchAsnOrders: async (warehouseId: string) => {
     set({ isFetchingAsns: true });
     try {
-      const response = await inboundService.getAsnOrders({
-        warehouse_id: warehouseId,
-        page_size: 50,
-      });
-      // Response key might be 'asn_orders' or 'items'
-      const allOrders = (response as any).asn_orders || (response as any).items || [];
+      // Page through ALL ASN orders so confirmed / partially-delivered orders
+      // beyond the first page still appear in the picker.
+      const PAGE_SIZE = 100;
+      const collected: any[] = [];
+      let page = 1;
+      let hasNext = true;
+
+      while (hasNext) {
+        const response: any = await inboundService.getAsnOrders({
+          warehouse_id: warehouseId,
+          page,
+          page_size: PAGE_SIZE,
+          sort_by: 'created_at',
+          sort_order: 'desc',
+        });
+        // Response key might be 'asn_orders' or 'items'
+        const pageOrders = response.asn_orders || response.items || [];
+        collected.push(...pageOrders);
+        hasNext = Boolean(response.pagination?.has_next);
+        page += 1;
+
+        // Safety cap — never loop unbounded.
+        if (page > 100) break;
+      }
+
       // Only show confirmed or partially_delivered ASNs (filter out drafts)
-      const orders = allOrders.filter(
+      const orders = collected.filter(
         (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'
       );
       set({ availableAsns: orders, isFetchingAsns: false });
@@ -377,6 +516,16 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   },
 
   clearRejections: () => set({ itemRejections: {} }),
+
+  setScanException: (exception) =>
+    set((state) => ({
+      scanExceptions: {
+        ...state.scanExceptions,
+        [exception.serial_number]: exception,
+      },
+    })),
+
+  clearScanExceptions: () => set({ scanExceptions: {} }),
 
   // ---------- Reject Slip Items (after slip creation) ----------
   rejectSlipItems: async (slipId: string) => {

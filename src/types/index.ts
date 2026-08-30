@@ -94,12 +94,46 @@ export interface InboundSession {
   created_at: string;
   asn_order_id?: string | null;
   asn_order_no?: string | null;
+  vehicle_arrival_id?: string | null;
+  vehicle_no?: string | null;
 }
 
 export interface StartSessionRequest {
   warehouse_id: string;
   dock_location: string;
   asn_order_id?: string;
+}
+
+// ---------- Vehicle Arrival (inbound dock check-in) ----------
+export interface VehicleArrivalCreatePayload {
+  vehicle_no: string;
+  driver_name?: string;
+  driver_contact?: string;
+  transporter?: string;
+  warehouse_id?: string;
+  dock?: string;
+  asn_order_ids?: string[];
+  notes?: string;
+}
+
+export interface VehicleArrival {
+  id: string;
+  organization_id: string;
+  vehicle: {
+    id: string;
+    vehicle_no: string;
+    driver_name?: string | null;
+    driver_contact?: string | null;
+    transporter?: string | null;
+  } | null;
+  warehouse_id?: string | null;
+  dock?: string | null;
+  status: string;
+  arrived_at: string;
+  notes?: string | null;
+  asn_orders?: { id: string; asn_order_no: string; status?: string | null }[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface RecordScanRequest {
@@ -118,6 +152,51 @@ export interface ScanRecord {
   packaging_unit_id: string | null;
   scanned_at: string;
   total_boxes_scanned: number;
+  exception_id?: string | null;
+  exception_status?: string | null;
+}
+
+export type InboundExceptionClassification = 'short' | 'damaged' | 'excess' | 'hold' | 'quarantine';
+export type InboundExceptionDestination = 'HOLD' | 'QUARANTINE';
+
+export interface InboundScanExceptionInput {
+  serial_number: string;
+  classification: InboundExceptionClassification;
+  reason_code: string;
+  destination?: InboundExceptionDestination;
+  note?: string;
+  evidence_uri?: string;
+  evidence_name?: string;
+  evidence_type?: string;
+}
+
+export interface InboundExceptionEvidence {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+export interface InboundException {
+  id: string;
+  warehouse_id: string;
+  slip_id?: string | null;
+  slip_item_id?: string | null;
+  exception_type: string;
+  reason_code: string;
+  status: string;
+  condition_code: string;
+  destination?: InboundExceptionDestination | 'RECEIVING-STAGE' | null;
+  destination_location_id?: string | null;
+  qr_identifier?: string | null;
+  sku?: string | null;
+  batch_number?: string | null;
+  quantity: number;
+  note?: string | null;
+  disposition?: string | null;
+  disposition_note?: string | null;
+  created_at?: string | null;
+  evidence: InboundExceptionEvidence[];
 }
 
 export interface SessionSummary {
@@ -188,6 +267,9 @@ export interface ReceivingSlipGroupItem {
   quantity: number;
   box_count: number;
   flag: string;
+  condition_code?: string | null;
+  exception_status?: string | null;
+  exception_destination_location_id?: string | null;
   notes: string | null;
 }
 
@@ -197,7 +279,9 @@ export interface ReceivingSlipItem {
   batch_number: string;
   quantity: number;
   box_count: number;
-  flag: 'ok' | 'short' | 'damaged' | 'rejected';
+  flag: 'ok' | 'short' | 'damaged' | 'excess' | 'hold' | 'quarantine' | 'rejected';
+  condition_code?: string | null;
+  exception_status?: string | null;
   notes: string | null;
   rejection_reason?: string | null;
   rejected_at?: string | null;
@@ -406,7 +490,11 @@ export interface Pagination {
 }
 
 export interface PaginatedResponse<T> {
-  [key: string]: T[];
+  items?: T[];
+  receiving_slips?: T[];
+  asn_orders?: T[];
+  put_away_lists?: T[];
+  tracking_items?: T[];
   pagination: Pagination;
 }
 
@@ -429,7 +517,7 @@ export interface AsnOrder {
   id: string;
   asn_order_no: string;
   supplier_name: string;
-  status: string;
+  status: 'draft' | 'confirmed' | 'partially_delivered' | 'delivered' | 'closed';
   expected_boxes: number;
   expected_items: number;
   created_at: string;
@@ -556,8 +644,13 @@ export interface AsnReceivingSummary {
   asn_order_no: string;
   asn_status: string;
   expected_total_qty: number;
+  scanned_total_qty: number;
   accepted_total_qty: number;
   rejected_total_qty: number;
+  short_total_qty: number;
+  excess_total_qty: number;
+  damaged_total_qty: number;
+  hold_total_qty: number;
   pending_total_qty: number;
   over_total_qty: number;
   total_line_items: number;
@@ -565,6 +658,11 @@ export interface AsnReceivingSummary {
   partial_items: number;
   not_received_items: number;
   over_items: number;
+  reconciliation_status: 'pending' | 'partial' | 'exception' | 'reconciled';
+  ready_for_receipt_note: boolean;
+  is_partial_receipt: boolean;
+  unresolved_exception_count: number;
+  active_session_id?: string | null;
   linked_slips: AsnLinkedSlip[];
   line_items: AsnSummaryLineItem[];
 }
@@ -585,11 +683,16 @@ export interface AsnSummaryLineItem {
   sku: string;
   item_name: string;
   expected_qty: number;
+  scanned_qty: number;
   accepted_qty: number;
   rejected_qty: number;
+  short_qty: number;
+  excess_qty: number;
+  damaged_qty: number;
+  hold_qty: number;
   pending_qty: number;
   over_qty: number;
-  status: 'matched' | 'partial' | 'not_received' | 'over';
+  status: 'matched' | 'partial' | 'not_received' | 'over' | 'exception' | 'not_applicable';
 }
 
 // ---------- Floating Items ----------

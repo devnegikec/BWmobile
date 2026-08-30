@@ -15,6 +15,8 @@ import type {
   FloatingItemsResponse,
   ResolveFloatingRequest,
   RejectItemRequest,
+  InboundException,
+  InboundScanExceptionInput,
 } from '../types';
 
 // ---------- Start Scan Session ----------
@@ -48,11 +50,36 @@ export async function getSessionSummary(sessionId: string): Promise<SessionSumma
   return data;
 }
 
+// ---------- Cancel Session (discard scans, no slip generated) ----------
+export async function cancelInboundSession(sessionId: string): Promise<InboundSession> {
+  const { data } = await coreClient.post<InboundSession>(
+    `/inbound/sessions/${sessionId}/cancel`
+  );
+  return data;
+}
+
 // ---------- End Session (Generate Receiving Slip) ----------
-export async function endSession(sessionId: string): Promise<ReceivingSlip> {
-  console.log('[API] endSession called:', { sessionId });
+export interface RejectionPayload {
+  serial_number: string;
+  reason?: string;
+}
+
+export async function endSession(
+  sessionId: string,
+  rejections?: RejectionPayload[],
+  exceptions?: InboundScanExceptionInput[]
+): Promise<ReceivingSlip> {
+  console.log('[API] endSession called:', {
+    sessionId,
+    rejectionsCount: rejections?.length || 0,
+    exceptionsCount: exceptions?.length || 0,
+  });
   const { data } = await coreClient.post<ReceivingSlip>(
-    `/inbound/sessions/${sessionId}/end`
+    `/inbound/sessions/${sessionId}/end`,
+    {
+      rejections: rejections || [],
+      exceptions: (exceptions || []).map(({ evidence_uri, evidence_name, evidence_type, ...exception }) => exception),
+    }
   );
   console.log('[API] endSession response:', {
     slipId: data.id,
@@ -61,6 +88,50 @@ export async function endSession(sessionId: string): Promise<ReceivingSlip> {
     asn_order_no: (data as any).asn_order_no || 'NOT IN RESPONSE',
     itemsCount: data.items?.length || 0,
   });
+  return data;
+}
+
+// ---------- Inbound Exceptions / Holds / Quarantine ----------
+export async function getInboundExceptions(params?: {
+  warehouse_id?: string;
+  destination?: 'HOLD' | 'QUARANTINE';
+  status?: string;
+}): Promise<InboundException[]> {
+  const { data } = await coreClient.get<InboundException[]>('/inbound/exceptions', { params });
+  return data;
+}
+
+export async function uploadInboundExceptionEvidence(
+  exceptionId: string,
+  evidence: Pick<InboundScanExceptionInput, 'evidence_uri' | 'evidence_name' | 'evidence_type'>
+): Promise<InboundException> {
+  if (!evidence.evidence_uri) throw new Error('No evidence file selected.');
+  const formData = new FormData();
+  formData.append('file', {
+    uri: evidence.evidence_uri,
+    name: evidence.evidence_name || 'inbound-evidence.jpg',
+    type: evidence.evidence_type || 'image/jpeg',
+  } as any);
+  const { data } = await coreClient.post<InboundException>(
+    `/inbound/exceptions/${exceptionId}/evidence`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  );
+  return data;
+}
+
+export async function disposeInboundException(
+  exceptionId: string,
+  payload: {
+    action: 'release_to_receiving' | 'move_to_hold' | 'move_to_quarantine' | 'return_to_sender' | 'dispose';
+    note?: string;
+    item_id?: string;
+  }
+): Promise<InboundException> {
+  const { data } = await coreClient.post<InboundException>(
+    `/inbound/exceptions/${exceptionId}/disposition`,
+    payload
+  );
   return data;
 }
 
@@ -118,18 +189,22 @@ export async function getAsnOrders(params?: {
   warehouse_id?: string;
   page?: number;
   page_size?: number;
+  sort_by?: string;
+  sort_order?: string;
 }): Promise<PaginatedResponse<AsnOrder>> {
   const { data } = await coreClient.get<PaginatedResponse<AsnOrder>>(
     '/asn-orders',
     { params }
   );
+  console.log('[API] getAsnOrders — fetched:', params);
   return data;
 }
 
 // ---------- ASN: Get Receiving Summary ----------
-export async function getAsnReceivingSummary(asnOrderId: string): Promise<AsnReceivingSummary> {
+export async function getAsnReceivingSummary(asnOrderId: string, sessionId?: string): Promise<AsnReceivingSummary> {
   const { data } = await coreClient.get<AsnReceivingSummary>(
-    `/asn-orders/${asnOrderId}/receiving-summary`
+    `/asn-orders/${asnOrderId}/receiving-summary`,
+    { params: sessionId ? { session_id: sessionId } : undefined }
   );
   return data;
 }
@@ -214,6 +289,18 @@ export async function assignBinToSlipItem(
 ): Promise<import('../types').AssignBinResponse> {
   const { data } = await coreClient.post<import('../types').AssignBinResponse>(
     `/inbound/receiving-slips/${slipId}/items/${itemId}/assign-bin`,
+    payload
+  );
+  return data;
+}
+
+// ---------- Register Vehicle Arrival (HC-03) ----------
+export async function registerVehicleArrival(
+  payload: import('../types').VehicleArrivalCreatePayload
+): Promise<import('../types').VehicleArrival> {
+  console.log('[API] POST /vehicle-arrivals — payload:', JSON.stringify(payload));
+  const { data } = await coreClient.post<import('../types').VehicleArrival>(
+    '/vehicle-arrivals',
     payload
   );
   return data;

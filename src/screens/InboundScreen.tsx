@@ -42,10 +42,13 @@ export default function InboundScreen() {
           (sum, p) => sum + (p.linked_units?.length || 0),
           0
         )}
+        reconciliation={flow.reconciliation}
+        isReconciliationLoading={flow.isReconciliationLoading}
         onScan={flow.handleScan}
         onViewSummary={flow.handleViewSummary}
         onEndSession={flow.handleEndSession}
         onCancel={flow.handleCancelSession}
+        onClassifyLastScan={flow.classifyLastScan}
       />
     );
   }

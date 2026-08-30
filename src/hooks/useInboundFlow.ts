@@ -1,12 +1,14 @@
 // ============================================================
 // useInboundFlow — Inbound session state + business logic
 // ============================================================
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
 import * as qsealService from '../api/qsealService';
+import { getAsnReceivingSummary, cancelInboundSession } from '../api/inboundService';
 import { extractQSealSerial } from '../utils/qsealUrl';
+import type { AsnReceivingSummary, InboundScanExceptionInput } from '../types';
 
 export type InboundStep = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 
@@ -33,6 +35,7 @@ export function useInboundFlow() {
     selectedAsn,
     isFetchingAsns,
     itemRejections,
+    setScanException,
     startSession,
     recordScan,
     clearLinkedUnits,
@@ -41,13 +44,16 @@ export function useInboundFlow() {
     clearSession,
     fetchAsnOrders,
     selectAsn,
-    rejectSlipItems,
   } = useInboundStore();
 
   const [step, setStep] = useState<InboundStep>('idle');
   const [dockLocation, setDockLocation] = useState('');
   const [isProcessingQSeal, setIsProcessingQSeal] = useState(false);
   const [showAsnPicker, setShowAsnPicker] = useState(false);
+  const [reconciliation, setReconciliation] = useState<AsnReceivingSummary | null>(null);
+  const [isReconciliationLoading, setIsReconciliationLoading] = useState(false);
+  // Monotonic request id to ignore out-of-order reconciliation responses
+  const reconciliationRequestId = useRef(0);
   // Prevent duplicate QSeal scans
   const [scannedQSealSerials, setScannedQSealSerials] = useState<Set<string>>(new Set());
 
@@ -64,6 +70,41 @@ export function useInboundFlow() {
     }
   }, [currentSession, isScanning, generatedSlip]);
 
+  const refreshReconciliation = useCallback(async () => {
+    const activeSession = useInboundStore.getState().currentSession;
+    const asnOrderId = activeSession?.asn_order_id || useInboundStore.getState().selectedAsn?.id;
+    if (!activeSession || !asnOrderId) {
+      reconciliationRequestId.current += 1;
+      setIsReconciliationLoading(false);
+      setReconciliation(null);
+      return;
+    }
+
+    // Tag this request so only the latest response is applied. Concurrent
+    // refreshes (e.g. a burst of scans) must not overwrite newer data with an
+    // older, slower response.
+    const requestId = ++reconciliationRequestId.current;
+    setIsReconciliationLoading(true);
+    try {
+      const summary = await getAsnReceivingSummary(asnOrderId, activeSession.id);
+      if (requestId === reconciliationRequestId.current) {
+        setReconciliation(summary);
+      }
+    } catch (error) {
+      if (requestId === reconciliationRequestId.current) {
+        console.warn('[Inbound] Failed to refresh live reconciliation:', error);
+      }
+    } finally {
+      if (requestId === reconciliationRequestId.current) {
+        setIsReconciliationLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshReconciliation();
+  }, [currentSession?.id, currentSession?.asn_order_id, refreshReconciliation]);
+
   // ============ HANDLERS ============
 
   const handleStartSession = async () => {
@@ -75,11 +116,53 @@ export function useInboundFlow() {
       Alert.alert('Error', 'Please enter a dock location.');
       return;
     }
-    try {
+
+    const doStart = async () => {
       clearLinkedUnits();
       await startSession(selectedWarehouse.id, dockLocation.trim(), selectedAsn?.id);
+      await refreshReconciliation();
       setStep('scanning');
+    };
+
+    try {
+      await doStart();
     } catch (err: any) {
+      const existingSessionId = err?.existingSessionId;
+      console.log('[Inbound] handleStartSession error:', {
+        existingSessionId: existingSessionId || 'NOT EXTRACTED',
+        status: err?.status,
+        message: err?.message,
+      });
+      if (existingSessionId) {
+        console.log('[Inbound] Showing cancel-and-start-fresh prompt for session:', existingSessionId);
+        Alert.alert(
+          'Session Already Active',
+          'An open scan session already exists for this ASN. Cancel the previous session and start a fresh one?',
+          [
+            { text: 'Keep Existing', style: 'cancel' },
+            {
+              text: 'Cancel & Start Fresh',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  console.log('[Inbound] Cancelling previous session:', existingSessionId);
+                  await cancelInboundSession(existingSessionId);
+                  console.log('[Inbound] Previous session cancelled — starting fresh session.');
+                  await doStart();
+                } catch (retryErr: any) {
+                  console.error('[Inbound] Cancel/retry failed:', {
+                    status: retryErr?.response?.status,
+                    data: retryErr?.response?.data,
+                    message: retryErr?.message,
+                  });
+                  Alert.alert('Error', retryErr?.message || 'Failed to start session.');
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
       Alert.alert('Error', err.message);
     }
   };
@@ -97,6 +180,7 @@ export function useInboundFlow() {
           } catch {}
         })
       );
+      await refreshReconciliation();
     }
   };
 
@@ -161,6 +245,7 @@ export function useInboundFlow() {
       console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
       try {
         await recordScan(data);
+        await refreshReconciliation();
         console.log('[Inbound] recordScan SUCCESS');
       } catch (err: any) {
         console.log('[Inbound] recordScan FAILED:', {
@@ -179,6 +264,20 @@ export function useInboundFlow() {
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
+  };
+
+  const classifyLastScan = (
+    exception: Omit<InboundScanExceptionInput, 'serial_number'>
+  ) => {
+    if (!lastScan) {
+      Alert.alert('No scan selected', 'Scan an item before adding an exception.');
+      return;
+    }
+    setScanException({ ...exception, serial_number: lastScan.qr_identifier });
+    Alert.alert(
+      'Exception saved',
+      `${lastScan.sku} will be routed to ${exception.destination || 'receipt review'} when the session ends.`
+    );
   };
 
   const handleEndSession = async () => {
@@ -202,11 +301,9 @@ export function useInboundFlow() {
         text: 'End Session',
         onPress: async () => {
           try {
-            const slip = await endSession();
-            // After slip is created, reject marked items
-            if (Object.values(itemRejections).some((r) => r.rejected)) {
-              await rejectSlipItems(slip.id);
-            }
+            // Rejections are sent with the end-session call, so the backend
+            // applies them before finalizing the receiving slip.
+            await endSession();
           } catch (err: any) {
             Alert.alert('Error', err.message);
           }
@@ -220,6 +317,7 @@ export function useInboundFlow() {
     clearLinkedUnits();
     setDockLocation('');
     setShowAsnPicker(false);
+    setReconciliation(null);
     setScannedQSealSerials(new Set());
     setStep('idle');
   };
@@ -238,6 +336,7 @@ export function useInboundFlow() {
             clearLinkedUnits();
             setDockLocation('');
             setShowAsnPicker(false);
+            setReconciliation(null);
             setScannedQSealSerials(new Set());
             setStep('idle');
           },
@@ -274,10 +373,13 @@ export function useInboundFlow() {
     selectedAsn,
     isFetchingAsns,
     isLoading,
+    reconciliation,
+    isReconciliationLoading,
     // Actions
     handleStartSession,
     handleScan,
     handleViewSummary,
+    classifyLastScan,
     handleEndSession,
     handleNewSession,
     handleCancelSession,

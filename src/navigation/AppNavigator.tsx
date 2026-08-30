@@ -17,6 +17,7 @@ import PickScreen from '../screens/PickScreen';
 import DirectPutawayScreen from '../screens/DirectPutawayScreen';
 import AssignBinScreen from '../screens/AssignBinScreen';
 import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
+import InboundExceptionsScreen from '../screens/InboundExceptionsScreen';
 import QsealCascadeScreen from '../screens/QsealCascadeScreen';
 import { useAuthStore } from '../store/authStore';
 
@@ -33,6 +34,7 @@ export type AppTabsParamList = {
   Putaway: undefined;
   Pick: undefined;
   ReceivingSlips: undefined;
+  InboundExceptions: undefined;
 };
 
 export type RootStackParamList = {
@@ -142,6 +144,16 @@ function AppTabs() {
           tabBarLabel: 'Slips',
           tabBarIcon: ({ color }) => (
             <TabIcon label="📋" color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="InboundExceptions"
+        component={InboundExceptionsScreen}
+        options={{
+          tabBarLabel: 'Holds',
+          tabBarIcon: ({ color }) => (
+            <TabIcon label="⚠️" color={color} />
           ),
         }}
       />

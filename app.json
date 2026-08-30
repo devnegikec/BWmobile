@@ -21,7 +21,13 @@
         "backgroundColor": "#1A73E8"
       },
       "package": "com.horizonsync.mobile",
-      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE", "CAMERA"],
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
       "usesCleartextTraffic": true,
       "blockedPermissions": []
     },
@@ -35,6 +41,11 @@
       [
         "expo-secure-store"
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "aef71333-23d4-4700-9d1c-9beb362b1aee"
+      }
+    }
   }
 }
