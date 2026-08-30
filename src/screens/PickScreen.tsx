@@ -201,11 +201,22 @@ export default function PickScreen() {
                     );
                     locationId = hit?.bin_location_id || '';
                 }
-                setVerifiedBin({ locationId, label });
-                showScanNotice(
-                    'success',
-                    `📍 Bin verified: ${label} — now scan the item to pick.`,
-                );
+                // A path-only bin can end up with no resolvable location id.
+                // Never mark it verified with an empty identifier — that empty
+                // string would be sent as `bin_location_id` on later item scans.
+                if (!locationId) {
+                    setVerifiedBin(null);
+                    showScanNotice(
+                        'warning',
+                        `📍 Bin path matched (${label}), but its location id is missing — item scans will not carry a bin id.`,
+                    );
+                } else {
+                    setVerifiedBin({ locationId, label });
+                    showScanNotice(
+                        'success',
+                        `📍 Bin verified: ${label} — now scan the item to pick.`,
+                    );
+                }
             } else {
                 setVerifiedBin(null);
                 const hint = Array.from(suggestedPaths).slice(0, 3).join('\n');
