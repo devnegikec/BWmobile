@@ -140,10 +140,10 @@ export async function clearTokens(): Promise<void> {
 
 // ---------- Response Interceptor — Auto-refresh on 401 ----------
 let isRefreshing = false;
-let failedQueue: Array<{
+let failedQueue: {
   resolve: (token: string) => void;
   reject: (error: unknown) => void;
-}> = [];
+}[] = [];
 
 function processQueue(error: unknown, token: string | null) {
   failedQueue.forEach(({ resolve, reject }) => {

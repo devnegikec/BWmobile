@@ -88,7 +88,7 @@ export const useQSealStore = create<QSealState>((set, get) => ({
 
   // ---- Add Child ----
   addChild: (serialNumber: string, nodeId: string) => {
-    const { parent, children, cascadeMode } = get();
+    const { parent, children } = get();
     set({ error: null });
 
     // Duplicate check

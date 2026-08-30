@@ -21,7 +21,7 @@ export function useInboundFlow() {
     if (!isAuthenticated || (!user && !worker)) {
       logout();
     }
-  }, [isAuthenticated, user, worker]);
+  }, [isAuthenticated, user, worker, logout]);
 
   const {
     currentSession,
@@ -170,6 +170,7 @@ export function useInboundFlow() {
   // Background: record individual item scans concurrently
   const recordScansInBackground = async (units: any[]) => {
     const CONCURRENCY = 5;
+    /* eslint-disable no-await-in-loop -- intentional batched concurrency (limit 5 in flight) */
     for (let i = 0; i < units.length; i += CONCURRENCY) {
       const batch = units.slice(i, i + CONCURRENCY);
       await Promise.allSettled(
@@ -182,6 +183,7 @@ export function useInboundFlow() {
       );
       await refreshReconciliation();
     }
+    /* eslint-enable no-await-in-loop */
   };
 
   // ---- QSeal parent scan: Step 1→2 (UI visible), Step 3 (background) ----

@@ -125,7 +125,7 @@ function DataWedgeScanner({
           <Text style={styles.helpText}>
             1. Open DataWedge on your Zebra device{'\n'}
             2. Create profile → Associate app: com.horizonsync.mobile{'\n'}
-            3. Ensure "Keyboard wedge" output is ON{'\n'}
+            3. Ensure &quot;Keyboard wedge&quot; output is ON{'\n'}
             4. Press the yellow scan button to scan
           </Text>
         </View>
@@ -198,7 +198,7 @@ export default function QrScanner({ onScan, onClose, title, subtitle, showHardwa
     if (!isZebraDevice && !useHardwareScanner && !permission?.granted && permission !== null) {
       requestPermission();
     }
-  }, [permission, useHardwareScanner]);
+  }, [permission, useHardwareScanner, requestPermission]);
 
   const handleBarCodeScanned = useCallback(
     ({ data }: { data: string }) => {

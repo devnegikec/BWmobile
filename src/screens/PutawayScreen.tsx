@@ -53,7 +53,7 @@ function Header({ title, subtitle, onBack }: { title: string; subtitle?: string;
 
 export default function PutawayScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { selectedWarehouse, worker } = useAuthStore();
+  const { selectedWarehouse } = useAuthStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [lists, setLists] = useState<PutAwayList[]>([]);
@@ -82,7 +82,7 @@ export default function PutawayScreen() {
         page_size: 50,
       });
       setLists(response.put_away_lists || []);
-    } catch (err: any) {
+    } catch {
       setError('Failed to load put-away lists.');
     }
   }, [selectedWarehouse]);
@@ -99,12 +99,13 @@ export default function PutawayScreen() {
 
   // ---------- Load Detail ----------
   const handleSelectList = async (list: PutAwayList) => {
+    if (isLoading) return;
     setIsLoading(true);
     try {
       const detail = await putawayService.getPutAwayList(list.id);
       setSelectedList(detail);
       setViewMode('detail');
-    } catch (err: any) {
+    } catch {
       Alert.alert('Error', 'Failed to load put-away details.');
     } finally {
       setIsLoading(false);
@@ -153,13 +154,14 @@ export default function PutawayScreen() {
     const pending = group.children.filter((c) => c.status === 'pending');
     if (pending.length === 0) return;
     setAssigningAll(true);
-    const completedIds: string[] = [];
-    for (const item of pending) {
-      try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
-        completedIds.push(item.id);
-      } catch {}
-    }
+    const results = await Promise.allSettled(
+      pending.map((item) =>
+        putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id)
+      )
+    );
+    const completedIds = pending
+      .filter((_, i) => results[i].status === 'fulfilled')
+      .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
   };
@@ -173,13 +175,14 @@ export default function PutawayScreen() {
       return;
     }
     setAssigningAll(true);
-    const completedIds: string[] = [];
-    for (const item of pending) {
-      try {
-        await putawayService.completePutAwayItem(selectedList.id, item.id, locationId);
-        completedIds.push(item.id);
-      } catch {}
-    }
+    const results = await Promise.allSettled(
+      pending.map((item) =>
+        putawayService.completePutAwayItem(selectedList.id, item.id, locationId)
+      )
+    );
+    const completedIds = pending
+      .filter((_, i) => results[i].status === 'fulfilled')
+      .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, binLabel);
     Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
@@ -189,7 +192,11 @@ export default function PutawayScreen() {
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };
@@ -215,7 +222,7 @@ export default function PutawayScreen() {
           ),
         };
       });
-    } catch (err: any) {
+    } catch {
       Alert.alert('Error', 'Failed to skip item.');
     } finally {
       setSkipModalVisible(false);
@@ -237,6 +244,17 @@ export default function PutawayScreen() {
     return (
       <View style={styles.container}>
         <Header title="Put-Away Lists" subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`} />
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+        {isLoading && (
+          <View style={styles.loadingBanner}>
+            <ActivityIndicator size="small" color="#1A73E8" />
+            <Text style={styles.loadingText}>Loading…</Text>
+          </View>
+        )}
         {/* Direct Put-Away button */}
         <TouchableOpacity
           style={styles.directPutawayButton}
@@ -691,6 +709,19 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyText: { color: '#8899AA', fontSize: 18, fontWeight: '600' },
   emptySubtext: { color: '#667788', fontSize: 14, marginTop: 8, textAlign: 'center' },
+
+  // Error / loading banners
+  errorBanner: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  errorText: { color: '#FCA5A5', fontSize: 13 },
+  loadingBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+  loadingText: { color: '#8899AA', fontSize: 13 },
 
   // Warning
   warningBanner: {

@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import type { User, Worker, Warehouse } from '../types';
 import * as authService from '../api/authService';
-import { clearTokens, getAccessToken, setOnTokensCleared } from '../api/client';
+import { getAccessToken, setOnTokensCleared } from '../api/client';
 
 interface AuthState {
   // State

@@ -20,7 +20,7 @@ import type { InboundException } from '../types';
 
 type Disposition = 'release_to_receiving' | 'move_to_hold' | 'move_to_quarantine' | 'return_to_sender' | 'dispose';
 
-const ACTIONS: Array<{ value: Disposition; label: string }> = [
+const ACTIONS: { value: Disposition; label: string }[] = [
   { value: 'release_to_receiving', label: 'Release to Receiving' },
   { value: 'move_to_hold', label: 'Move to HOLD' },
   { value: 'move_to_quarantine', label: 'Move to QUARANTINE' },

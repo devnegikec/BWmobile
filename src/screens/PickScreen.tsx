@@ -1,7 +1,7 @@
 // ============================================================
 // Pick Screen — List, scan and complete pick lists (reverse of put-away)
 // ============================================================
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -86,7 +86,7 @@ export default function PickScreen() {
                 (l) => l.status === 'draft' || l.status === 'in_progress',
             );
             setLists(active);
-        } catch (err: any) {
+        } catch {
             setError('Failed to load pick lists.');
         }
     }, [selectedWarehouse]);
@@ -103,12 +103,13 @@ export default function PickScreen() {
 
     // ---------- Load Detail ----------
     const handleSelectList = async (list: PickListSummary) => {
+        if (isLoading) return;
         setIsLoading(true);
         try {
             const detail = await pickService.getPickList(list.id);
             setSelectedList(detail);
             setViewMode('detail');
-        } catch (err: any) {
+        } catch {
             Alert.alert('Error', 'Failed to load pick list details.');
         } finally {
             setIsLoading(false);
@@ -265,7 +266,11 @@ export default function PickScreen() {
     const toggleGroup = (key: string) => {
         setExpandedGroups((prev) => {
             const next = new Set(prev);
-            next.has(key) ? next.delete(key) : next.add(key);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
             return next;
         });
     };
@@ -281,6 +286,17 @@ export default function PickScreen() {
         return (
             <View style={styles.container}>
                 <Header title="Pick Lists" subtitle={`${lists.length} active · ${selectedWarehouse?.name || ''}`} />
+                {error ? (
+                    <View style={styles.errorBanner}>
+                        <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                ) : null}
+                {isLoading && (
+                    <View style={styles.loadingBanner}>
+                        <ActivityIndicator size="small" color="#1A73E8" />
+                        <Text style={styles.loadingText}>Loading…</Text>
+                    </View>
+                )}
                 <FlatList
                     style={{ flex: 1 }}
                     data={lists}
@@ -561,6 +577,12 @@ const styles = StyleSheet.create({
     emptyIcon: { fontSize: 44 },
     emptyText: { color: '#E0E8F0', fontSize: 16, fontWeight: '600', marginTop: 12 },
     emptySubtext: { color: '#667788', fontSize: 13, marginTop: 4, textAlign: 'center' },
+
+    // Error / loading banners
+    errorBanner: { backgroundColor: 'rgba(239,68,68,0.15)', paddingHorizontal: 16, paddingVertical: 10, marginHorizontal: 16, marginBottom: 8, borderRadius: 8 },
+    errorText: { color: '#FCA5A5', fontSize: 13 },
+    loadingBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+    loadingText: { color: '#8899AA', fontSize: 13 },
 
     // Detail progress
     detailProgressWrap: { paddingHorizontal: 16, marginBottom: 8 },
