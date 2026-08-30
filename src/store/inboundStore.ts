@@ -435,17 +435,33 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   fetchAsnOrders: async (warehouseId: string) => {
     set({ isFetchingAsns: true });
     try {
-      const response = await inboundService.getAsnOrders({
-        warehouse_id: warehouseId,
-        page: 1,
-        page_size: 50,
-        sort_by: 'created_at',
-        sort_order: 'desc',
-      });
-      // Response key might be 'asn_orders' or 'items'
-      const allOrders = (response as any).asn_orders || (response as any).items || [];
+      // Page through ALL ASN orders so confirmed / partially-delivered orders
+      // beyond the first page still appear in the picker.
+      const PAGE_SIZE = 100;
+      const collected: any[] = [];
+      let page = 1;
+      let hasNext = true;
+
+      while (hasNext) {
+        const response: any = await inboundService.getAsnOrders({
+          warehouse_id: warehouseId,
+          page,
+          page_size: PAGE_SIZE,
+          sort_by: 'created_at',
+          sort_order: 'desc',
+        });
+        // Response key might be 'asn_orders' or 'items'
+        const pageOrders = response.asn_orders || response.items || [];
+        collected.push(...pageOrders);
+        hasNext = Boolean(response.pagination?.has_next);
+        page += 1;
+
+        // Safety cap — never loop unbounded.
+        if (page > 100) break;
+      }
+
       // Only show confirmed or partially_delivered ASNs (filter out drafts)
-      const orders = allOrders.filter(
+      const orders = collected.filter(
         (o: any) => o.status === 'confirmed' || o.status === 'partially_delivered'
       );
       set({ availableAsns: orders, isFetchingAsns: false });

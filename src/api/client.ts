@@ -18,7 +18,19 @@ function resolveDevHost(): string | null {
     (Constants as unknown as { manifest?: { debuggerHost?: string } })
       .manifest?.debuggerHost;
   if (!hostUri) return null;
-  return hostUri.replace(/^https?:\/\//, '').split(':')[0] || null;
+
+  // hostUri looks like `192.168.1.10:8081` (IPv4) or `[2001:db8::1]:8081`
+  // (IPv6). Strip the scheme, then handle a bracketed IPv6 literal before
+  // falling back to the `host:port` split used for IPv4.
+  const withoutScheme = hostUri.replace(/^https?:\/\//, '');
+
+  if (withoutScheme.startsWith('[')) {
+    const close = withoutScheme.indexOf(']');
+    if (close !== -1) return withoutScheme.slice(1, close) || null;
+    return withoutScheme.slice(1) || null;
+  }
+
+  return withoutScheme.split(':')[0] || null;
 }
 
 const DEV_HOST = resolveDevHost();

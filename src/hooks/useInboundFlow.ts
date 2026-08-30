@@ -1,7 +1,7 @@
 // ============================================================
 // useInboundFlow — Inbound session state + business logic
 // ============================================================
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useInboundStore } from '../store/inboundStore';
@@ -52,6 +52,8 @@ export function useInboundFlow() {
   const [showAsnPicker, setShowAsnPicker] = useState(false);
   const [reconciliation, setReconciliation] = useState<AsnReceivingSummary | null>(null);
   const [isReconciliationLoading, setIsReconciliationLoading] = useState(false);
+  // Monotonic request id to ignore out-of-order reconciliation responses
+  const reconciliationRequestId = useRef(0);
   // Prevent duplicate QSeal scans
   const [scannedQSealSerials, setScannedQSealSerials] = useState<Set<string>>(new Set());
 
@@ -72,18 +74,30 @@ export function useInboundFlow() {
     const activeSession = useInboundStore.getState().currentSession;
     const asnOrderId = activeSession?.asn_order_id || useInboundStore.getState().selectedAsn?.id;
     if (!activeSession || !asnOrderId) {
+      reconciliationRequestId.current += 1;
+      setIsReconciliationLoading(false);
       setReconciliation(null);
       return;
     }
 
+    // Tag this request so only the latest response is applied. Concurrent
+    // refreshes (e.g. a burst of scans) must not overwrite newer data with an
+    // older, slower response.
+    const requestId = ++reconciliationRequestId.current;
     setIsReconciliationLoading(true);
     try {
       const summary = await getAsnReceivingSummary(asnOrderId, activeSession.id);
-      setReconciliation(summary);
+      if (requestId === reconciliationRequestId.current) {
+        setReconciliation(summary);
+      }
     } catch (error) {
-      console.warn('[Inbound] Failed to refresh live reconciliation:', error);
+      if (requestId === reconciliationRequestId.current) {
+        console.warn('[Inbound] Failed to refresh live reconciliation:', error);
+      }
     } finally {
-      setIsReconciliationLoading(false);
+      if (requestId === reconciliationRequestId.current) {
+        setIsReconciliationLoading(false);
+      }
     }
   }, []);
 
