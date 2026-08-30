@@ -58,10 +58,10 @@ export default function PutawayScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [lists, setLists] = useState<PutAwayList[]>([]);
   const [selectedList, setSelectedList] = useState<PutAwayList | null>(null);
-  const [, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
-  const [, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [assigningAll, setAssigningAll] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -99,6 +99,7 @@ export default function PutawayScreen() {
 
   // ---------- Load Detail ----------
   const handleSelectList = async (list: PutAwayList) => {
+    if (isLoading) return;
     setIsLoading(true);
     try {
       const detail = await putawayService.getPutAwayList(list.id);
@@ -243,6 +244,17 @@ export default function PutawayScreen() {
     return (
       <View style={styles.container}>
         <Header title="Put-Away Lists" subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`} />
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+        {isLoading && (
+          <View style={styles.loadingBanner}>
+            <ActivityIndicator size="small" color="#1A73E8" />
+            <Text style={styles.loadingText}>Loading…</Text>
+          </View>
+        )}
         {/* Direct Put-Away button */}
         <TouchableOpacity
           style={styles.directPutawayButton}
@@ -697,6 +709,19 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyText: { color: '#8899AA', fontSize: 18, fontWeight: '600' },
   emptySubtext: { color: '#667788', fontSize: 14, marginTop: 8, textAlign: 'center' },
+
+  // Error / loading banners
+  errorBanner: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  errorText: { color: '#FCA5A5', fontSize: 13 },
+  loadingBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+  loadingText: { color: '#8899AA', fontSize: 13 },
 
   // Warning
   warningBanner: {
