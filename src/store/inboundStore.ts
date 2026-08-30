@@ -205,14 +205,22 @@ export const useInboundStore = create<InboundState>((set, get) => ({
         device_type: 'mobile',
         os: 'iOS/Android',
       });
-      // Update session with new total
-      set({
-        lastScan: scan,
-        currentSession: {
-          ...session,
-          total_boxes_scanned: scan.total_boxes_scanned,
-        },
-        isLoading: false,
+      // Update the session from the LATEST store state, never the snapshot
+      // captured before the await. Concurrent scans resolve out of order, so
+      // keep the total monotonic — a slower, older response must not roll the
+      // count backwards over a newer one.
+      set((state) => {
+        const latest = state.currentSession;
+        const nextTotal = latest
+          ? Math.max(latest.total_boxes_scanned, scan.total_boxes_scanned)
+          : scan.total_boxes_scanned;
+        return {
+          lastScan: scan,
+          currentSession: latest
+            ? { ...latest, total_boxes_scanned: nextTotal }
+            : latest,
+          isLoading: false,
+        };
       });
     } catch (error: any) {
       const status = error.response?.status;

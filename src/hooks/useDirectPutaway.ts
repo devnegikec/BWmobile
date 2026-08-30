@@ -84,7 +84,7 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
             if (!tracking && warehouseId) {
               // No inbound scan exists — create the tracking row on the fly
               tracking = await putawayService.scanItemForPutaway({
-                qr: unit.product_item_url || unit.serial_number,
+                qr: unit.serial_number,
                 warehouse_id: warehouseId,
               });
             }

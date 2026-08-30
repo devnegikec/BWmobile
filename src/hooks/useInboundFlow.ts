@@ -175,9 +175,8 @@ export function useInboundFlow() {
       const batch = units.slice(i, i + CONCURRENCY);
       await Promise.allSettled(
         batch.map(async (unit) => {
-          const url = unit.product_item_url || unit.serial_number;
           try {
-            await recordScan(url);
+            await recordScan(unit.serial_number);
           } catch {}
         })
       );
