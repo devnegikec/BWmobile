@@ -229,20 +229,24 @@ export default function AssignBinScreen() {
     setPhase('submitting');
     setError(null);
 
-    const failed: string[] = [];
-
-    for (const item of items) {
-      try {
-        await binService.addStockToBin({
+    const results = await Promise.allSettled(
+      items.map((item) =>
+        binService.addStockToBin({
           bin_id: binInfo.bin_location_id,
           item_id: item.item_id,
           quantity: item.quantity,
           batch_number: item.batch_number || undefined,
-        });
-      } catch (err: any) {
-        failed.push(`${item.sku}: ${getErrorMessage(err)}`);
-      }
-    }
+        })
+      )
+    );
+
+    const failed = results
+      .map((result, i) =>
+        result.status === 'rejected'
+          ? `${items[i].sku}: ${getErrorMessage(result.reason)}`
+          : null
+      )
+      .filter((msg): msg is string => msg !== null);
 
     if (failed.length > 0) {
       setError(`Some items failed:\n${failed.join('\n')}`);
