@@ -55,53 +55,63 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       const parent = await qsealService.getLinkedUnits(node.node_id);
       const units = parent.linked_units || [];
 
-      setScannedSerials((prev) => new Set(prev).add(serial));
+      setScannedSerials((prev) => {
+        const next = new Set(prev).add(serial);
+        // Mark every child serial as scanned too, so scanning a child again
+        // won't create a second assignment row for the same item.
+        for (const unit of units) {
+          if (unit.serial_number) next.add(unit.serial_number);
+        }
+        return next;
+      });
 
       const boxKey = `box-${node.node_id}`;
-      const newRows: TableRow[] = [{
+      const boxRow: TableRow = {
         key: boxKey, type: 'box',
         productName: parent.name || serial,
         sku: units[0]?.product_sku || '-',
         batchNumber: units[0]?.dispatch_batch || '-',
         itemCount: units.length,
         serial, tracking: null, status: 'pending', isExpandable: true,
-      }];
+      };
 
-      for (const unit of units) {
-        let status: TableRow['status'] = 'not-found';
-        let tracking: TrackingItem | null = null;
-        try {
-          tracking = await putawayService.lookupTrackingByQr(unit.serial_number);
-          if (!tracking && warehouseId) {
-            // No inbound scan exists — create the tracking row on the fly
-            tracking = await putawayService.scanItemForPutaway({
-              qr: unit.product_item_url || unit.serial_number,
-              warehouse_id: warehouseId,
-            });
-          }
-          console.log(
-            '[DirectPutAway] lookup child', unit.serial_number, '->',
-            tracking
-              ? `putaway=${tracking.putaway_status} receiving=${tracking.receiving_status}`
-              : 'NOT FOUND'
-          );
-          if (!tracking) status = 'not-found';
-          else if (tracking.putaway_status === 'completed') status = 'already-done';
-          else if (tracking.receiving_status === 'rejected') status = 'rejected';
-          else status = 'pending';
-        } catch { status = 'not-found'; }
+      const childRows = await Promise.all(
+        units.map(async (unit): Promise<TableRow> => {
+          let status: TableRow['status'] = 'not-found';
+          let tracking: TrackingItem | null = null;
+          try {
+            tracking = await putawayService.lookupTrackingByQr(unit.serial_number);
+            if (!tracking && warehouseId) {
+              // No inbound scan exists — create the tracking row on the fly
+              tracking = await putawayService.scanItemForPutaway({
+                qr: unit.product_item_url || unit.serial_number,
+                warehouse_id: warehouseId,
+              });
+            }
+            console.log(
+              '[DirectPutAway] lookup child', unit.serial_number, '->',
+              tracking
+                ? `putaway=${tracking.putaway_status} receiving=${tracking.receiving_status}`
+                : 'NOT FOUND'
+            );
+            if (!tracking) status = 'not-found';
+            else if (tracking.putaway_status === 'completed') status = 'already-done';
+            else if (tracking.receiving_status === 'rejected') status = 'rejected';
+            else status = 'pending';
+          } catch { status = 'not-found'; }
 
-        newRows.push({
-          key: `child-${unit.id}`, type: 'child',
-          productName: unit.serial_number,
-          sku: unit.product_sku || '-',
-          batchNumber: unit.serial_number,
-          itemCount: 1, serial: unit.serial_number,
-          tracking, status, isExpandable: false,
-        });
-      }
+          return {
+            key: `child-${unit.id}`, type: 'child',
+            productName: unit.serial_number,
+            sku: unit.product_sku || '-',
+            batchNumber: unit.serial_number,
+            itemCount: 1, serial: unit.serial_number,
+            tracking, status, isExpandable: false,
+          };
+        })
+      );
 
-      setRows((prev) => [...prev, ...newRows]);
+      setRows((prev) => [...prev, boxRow, ...childRows]);
       setLastFeedback(`📦 "${parent.name || serial}" — ${units.length} item(s)`);
     } catch (err: any) {
       const d = err?.response?.data?.detail || err?.message || 'Failed';
@@ -200,17 +210,16 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       if (boxChildren.length === 0) { Alert.alert('Info', 'No pending items in this box.'); return; }
 
       setIsAssigning(true);
-      let done = 0;
-      for (const c of boxChildren) {
-        try {
+      const results = await Promise.allSettled(
+        boxChildren.map(async (c) => {
           await putawayService.completePutawayByQr({
             qr: c.serial, bin_id: locationId, quantity: c.tracking!.quantity,
             put_away_list_id: listId || undefined,
           });
           setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
-          done++;
-        } catch {}
-      }
+        })
+      );
+      const done = results.filter((r) => r.status === 'fulfilled').length;
       setIsAssigning(false);
       Alert.alert('Done', `${done}/${boxChildren.length} items assigned.`);
     } else {
@@ -247,17 +256,16 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
     const listId = await ensureDirectList();
 
     setIsAssigning(true);
-    let done = 0;
-    for (const r of pending) {
-      try {
+    const results = await Promise.allSettled(
+      pending.map(async (r) => {
         await putawayService.completePutawayByQr({
           qr: r.serial, bin_id: locationId, quantity: r.tracking!.quantity,
           put_away_list_id: listId || undefined,
         });
         setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
-        done++;
-      } catch {}
-    }
+      })
+    );
+    const done = results.filter((r) => r.status === 'fulfilled').length;
     setIsAssigning(false);
     Alert.alert('Done', `${done}/${pending.length} items assigned.`);
   };

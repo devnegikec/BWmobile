@@ -150,6 +150,12 @@ export async function lookupTrackingByQr(qr: string): Promise<TrackingItem | nul
       err?.response?.status,
       JSON.stringify(err?.response?.data ?? err?.message)
     );
-    return null;
+    // Only a genuine "not found" (404) means the tracking row doesn't exist.
+    // Server / timeout / network errors must propagate so callers don't mistake
+    // a transient failure for a missing record and create a duplicate row.
+    if (err?.response?.status === 404) {
+      return null;
+    }
+    throw err;
   }
 }
