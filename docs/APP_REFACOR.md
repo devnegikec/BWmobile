@@ -38,7 +38,7 @@ Pure extraction — move JSX sub-views and `StyleSheet` blocks out; no prop/beha
 - **T3.1** PutawayScreen.tsx → child components + `PutawayScreen.styles.ts`.
 - **T3.2** AssignBinScreen.tsx → same pattern.
 - **T3.3** PickScreen.tsx → same pattern.
-- **T3.4** QsealCascadeScreen.tsx → same pattern.
+- **T3.4** QsealCascadeScreen.tsx → same pattern. (DONE)
 - **T3.5** QrScanner.tsx (473) → split the modal/camera/manual-entry variants.
 - **T3.6** SummaryView.tsx (563) → extract the rejection/group tables.
 
