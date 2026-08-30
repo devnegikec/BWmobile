@@ -32,10 +32,11 @@ export async function getPickList(listId: string): Promise<PickList> {
 export async function recordPickScan(
     listId: string,
     qrData: string,
+    binLocationId?: string | null,
 ): Promise<PickScanResult> {
     const { data } = await coreClient.post<PickScanResult>(
         `/outbound/${listId}/scan`,
-        { qr_data: qrData },
+        { qr_data: qrData, bin_location_id: binLocationId ?? null },
     );
     return data;
 }

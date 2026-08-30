@@ -68,6 +68,10 @@ export const styles = StyleSheet.create({
     scanBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
     btnDisabled: { backgroundColor: '#1E3A5F', opacity: 0.6 },
 
+    // Active (verified) bin indicator
+    binActiveBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 6 },
+    binActiveText: { color: '#34D399', fontSize: 12, fontWeight: '600', flexShrink: 1 },
+
     // Action bar
     actionBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
     workerText: { color: '#8899AA', fontSize: 13, flex: 1 },

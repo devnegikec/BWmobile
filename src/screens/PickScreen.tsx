@@ -47,6 +47,10 @@ export default function PickScreen() {
     const [submitting, setSubmitting] = useState(false);
     const [scanNotice, setScanNotice] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
+    // Bin verification state — the last verified source bin, sent with item
+    // scans to satisfy the backend's `require_bin_scan` wrong-bin hard stop.
+    const [verifiedBin, setVerifiedBin] = useState<{ locationId: string; label: string } | null>(null);
+
     // Reassign state
     const [reassignVisible, setReassignVisible] = useState(false);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -91,6 +95,7 @@ export default function PickScreen() {
         try {
             const detail = await pickService.getPickList(list.id);
             setSelectedList(detail);
+            setVerifiedBin(null);
             setViewMode('detail');
         } catch {
             Alert.alert('Error', 'Failed to load pick list details.');
@@ -125,9 +130,13 @@ export default function PickScreen() {
     };
 
     // Record a single pick scan and surface non-blocking feedback.
-    const recordSinglePick = async (qrData: string, scannedSerial?: string) => {
+    const recordSinglePick = async (
+        qrData: string,
+        scannedSerial?: string,
+        binLocationId?: string | null,
+    ) => {
         if (!selectedList) return;
-        const result = await pickService.recordPickScan(selectedList.id, qrData);
+        const result = await pickService.recordPickScan(selectedList.id, qrData, binLocationId ?? verifiedBin?.locationId ?? null);
         const serial = scannedSerial ?? extractQSealSerial(qrData) ?? qrData;
         const category = classifyPick(result, serial);
         const matched = selectedList.items.find(
@@ -184,11 +193,21 @@ export default function PickScreen() {
                 suggestedPaths.has(qr) ||
                 suggestedIds.has(qr);
             if (matches) {
-                Alert.alert(
-                    'Bin Verified',
-                    `📍 ${label}\nThis is a suggested bin for this pick list. Now scan the item to pick.`,
+                // If the scan only carried a full path (no UUID / no QR-code
+                // lookup), fall back to the suggested line's bin id.
+                if (!locationId) {
+                    const hit = selectedList.items.find(
+                        (i) => i.bin_location_path === qr || i.bin_location_id === qr,
+                    );
+                    locationId = hit?.bin_location_id || '';
+                }
+                setVerifiedBin({ locationId, label });
+                showScanNotice(
+                    'success',
+                    `📍 Bin verified: ${label} — now scan the item to pick.`,
                 );
             } else {
+                setVerifiedBin(null);
                 const hint = Array.from(suggestedPaths).slice(0, 3).join('\n');
                 Alert.alert(
                     'Wrong Bin',
@@ -213,32 +232,56 @@ export default function PickScreen() {
                 });
                 const parent = await qsealService.getLinkedUnits(node.node_id);
                 const units = parent.linked_units || [];
+                console.log('[PickScreen] linked units:', units.map((u) => ({ serial: u.serial_number, sku: u.product_sku, batch: u.dispatch_batch, itemUrl: u.product_item_url })));
                 if (units.length === 0) {
                     showScanNotice('warning', `⚠ Box ${parent.name || parentSerial} has no linked units.`);
                 } else {
-                    const results = await Promise.allSettled(
-                        units.map((unit) => pickService.recordPickScan(selectedList.id, unit.serial_number)),
-                    );
+                    // Backend resolves the serial via ProductItem.serial_number → Item,
+                    // so send the bare serial (not product_item_url or a batch payload).
+                    // Scans run sequentially so each pick line is matched and committed
+                    // one at a time (parallel scans race on "first remaining line").
                     let correct = 0;
                     let sameSku = 0;
                     let offList = 0;
                     let failed = 0;
-                    results.forEach((r, i) => {
-                        if (r.status === 'fulfilled') {
-                            const category = classifyPick(r.value, units[i].serial_number);
+                    const failures: string[] = [];
+                    for (const unit of units) {
+                        try {
+                            const result = await pickService.recordPickScan(
+                                selectedList.id,
+                                unit.serial_number,
+                                verifiedBin?.locationId ?? null,
+                            );
+                            const category = classifyPick(result, unit.serial_number);
                             if (category === 'correct') correct += 1;
                             else if (category === 'same-sku') sameSku += 1;
                             else offList += 1;
-                        } else {
+                        } catch (err: any) {
                             failed += 1;
+                            const data = err?.response?.data;
+                            const detail = data?.detail;
+                            let reason: string;
+                            if (typeof detail === 'string' && detail.trim()) reason = detail;
+                            else if (Array.isArray(detail) && detail.length > 0) reason = detail.map((d: any) => d?.msg || JSON.stringify(d)).join('; ');
+                            else if (detail && typeof detail === 'object') reason = detail.message || detail.error || JSON.stringify(detail);
+                            else if (typeof data === 'string' && data.trim()) reason = data;
+                            else if (data?.message && typeof data.message === 'string') reason = data.message;
+                            else if (data?.error && typeof data.error === 'string') reason = data.error;
+                            else reason = err?.message || 'unknown error';
+                            failures.push(`${unit.serial_number}: ${reason}`);
+                            console.error('[PickScreen] failed unit raw response:', JSON.stringify(data));
                         }
-                    });
+                    }
                     await refreshDetail(selectedList.id);
                     const picked = correct + sameSku + offList;
                     const parts = [`📦 ${parent.name || parentSerial}: ${picked} unit(s) picked`];
                     if (sameSku > 0) parts.push(`${sameSku} same-SKU (different box)`);
                     if (offList > 0) parts.push(`${offList} off-list`);
                     if (failed > 0) parts.push(`${failed} failed`);
+                    if (failures.length > 0) {
+                        console.error('[PickScreen] failed units:', failures);
+                        parts.push(failures[0]);
+                    }
                     showScanNotice(sameSku > 0 || offList > 0 || failed > 0 ? 'warning' : 'success', parts.join(' · '));
                 }
                 return;
@@ -344,6 +387,7 @@ export default function PickScreen() {
     const handleBackToList = () => {
         setViewMode('list');
         setSelectedList(null);
+        setVerifiedBin(null);
         loadLists();
     };
 
@@ -454,6 +498,13 @@ export default function PickScreen() {
                         <Text style={[styles.scanNoticeText, scanNotice.type === 'success' ? styles.scanNoticeTextSuccess : scanNotice.type === 'warning' ? styles.scanNoticeTextWarning : styles.scanNoticeTextError]}>
                             {scanNotice.text}
                         </Text>
+                    </View>
+                )}
+
+                {/* Verified source bin (persistent) */}
+                {verifiedBin && (
+                    <View style={styles.binActiveBar}>
+                        <Text style={styles.binActiveText} numberOfLines={1}>📍 Active bin: {verifiedBin.label}</Text>
                     </View>
                 )}
 
