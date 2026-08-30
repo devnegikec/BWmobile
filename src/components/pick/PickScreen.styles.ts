@@ -113,6 +113,16 @@ export const styles = StyleSheet.create({
     scannerCloseBtn: { position: 'absolute', top: 50, right: 20, backgroundColor: '#1F2937', borderRadius: 20, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
     closeIcon: { color: '#fff', fontSize: 18, fontWeight: '700' },
 
+    // Scan feedback (non-blocking)
+    scanNotice: { marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
+    scanNoticeSuccess: { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: '#10B981' },
+    scanNoticeWarning: { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: '#F59E0B' },
+    scanNoticeError: { backgroundColor: 'rgba(239,68,68,0.15)', borderColor: '#EF4444' },
+    scanNoticeText: { fontSize: 13, fontWeight: '600', textAlign: 'center' },
+    scanNoticeTextSuccess: { color: '#34D399' },
+    scanNoticeTextWarning: { color: '#FBBF24' },
+    scanNoticeTextError: { color: '#FCA5A5' },
+
     // Reassign modal
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
     modalContent: { backgroundColor: '#1A2332', borderRadius: 14, padding: 18 },

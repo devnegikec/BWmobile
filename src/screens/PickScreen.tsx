@@ -16,20 +16,23 @@ import {
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import * as pickService from '@/api/pickService';
+import * as qsealService from '@/api/qsealService';
 import QrScanner from '@/components/QrScanner';
 import PutawayHeader from '@/components/putaway/PutawayHeader';
 import PickListCard from '@/components/pick/PickListCard';
 import PickItemsTable from '@/components/pick/PickItemsTable';
 import AssignWorkerModal from '@/components/pick/AssignWorkerModal';
 import { styles } from '@/components/pick/PickScreen.styles';
+import { extractQSealSerial, extractQSealParentSerial } from '@/utils/qsealUrl';
 import { parseBinQR, lookupBinByQr } from '@/components/putaway/binScanner';
 import type { PickGroup } from '@/components/pick/types';
-import type { PickList, PickListSummary, Worker } from '@/types';
+import type { PickList, PickListSummary, PickScanResult, Worker } from '@/types';
 
 type ViewMode = 'list' | 'detail';
 
 export default function PickScreen() {
-    const { selectedWarehouse } = useAuthStore();
+    const { selectedWarehouse, user, worker } = useAuthStore();
+    const orgId = user?.organization_id || worker?.organization_id || '';
 
     const [viewMode, setViewMode] = useState<ViewMode>('list');
     const [lists, setLists] = useState<PickListSummary[]>([]);
@@ -42,6 +45,7 @@ export default function PickScreen() {
     const [scanText, setScanText] = useState('');
     const [scanning, setScanning] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [scanNotice, setScanNotice] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
     // Reassign state
     const [reassignVisible, setReassignVisible] = useState(false);
@@ -102,6 +106,54 @@ export default function PickScreen() {
         } catch { }
     }, []);
 
+    // ---------- Scan feedback helpers (non-blocking) ----------
+    const showScanNotice = (type: 'success' | 'warning' | 'error', text: string) => {
+        setScanNotice({ type, text });
+    };
+
+    const classifyPick = (result: PickScanResult, scannedSerial: string): 'correct' | 'same-sku' | 'off-list' => {
+        const expectedSerials = new Set(
+            selectedList?.items.flatMap((i) => (i.serials ?? []).map((s) => s.serial_number)) ?? [],
+        );
+        // "Correct box" means the scanned serial is one the pick list actually expects.
+        if (expectedSerials.has(scannedSerial)) return 'correct';
+        // item_id ↔ SKU is 1:1, so a sku/item_id match means "same product, different box".
+        const skuMatch = !!selectedList?.items.some(
+            (i) => i.sku === result.sku || i.item_id === result.item_id,
+        );
+        return skuMatch ? 'same-sku' : 'off-list';
+    };
+
+    // Record a single pick scan and surface non-blocking feedback.
+    const recordSinglePick = async (qrData: string, scannedSerial?: string) => {
+        if (!selectedList) return;
+        const result = await pickService.recordPickScan(selectedList.id, qrData);
+        const serial = scannedSerial ?? extractQSealSerial(qrData) ?? qrData;
+        const category = classifyPick(result, serial);
+        const matched = selectedList.items.find(
+            (i) => i.sku === result.sku || i.item_id === result.item_id,
+        );
+        const suggestedBin = matched?.bin_location_path || matched?.bin_location_id || null;
+
+        if (category === 'correct') {
+            showScanNotice(
+                'success',
+                `✓ Correct box · ${result.sku} — ${result.scanned_qty} picked (${result.remaining_qty} left)${suggestedBin ? ` · 📍 ${suggestedBin}` : ''}`,
+            );
+        } else if (category === 'same-sku') {
+            showScanNotice(
+                'warning',
+                `⚠ Same SKU, different box · ${result.sku} — picked anyway (${result.remaining_qty} left)`,
+            );
+        } else {
+            showScanNotice(
+                'warning',
+                `⚠ ${result.sku} is not on this pick list — recorded anyway`,
+            );
+        }
+        return result;
+    };
+
     // ---------- Scan an item QR (or verify a bin/location QR) ----------
     const handleScan = async (data: string) => {
         if (!selectedList) return;
@@ -147,22 +199,57 @@ export default function PickScreen() {
             return;
         }
 
-        // Item/serial QR → record the pick
         setSubmitting(true);
+        setScanNotice(null);
         try {
-            const result = await pickService.recordPickScan(selectedList.id, qr);
-            const matched = selectedList.items.find(
-                (i) => i.sku === result.sku || i.item_id === result.item_id,
-            );
-            const suggestedBin = matched?.bin_location_path || matched?.bin_location_id || null;
+            // QSeal parent box → resolve linked units and pick each child serial.
+            const parentSerial = extractQSealParentSerial(qr);
+            if (parentSerial && orgId) {
+                const node = await qsealService.scanQSeal(orgId, {
+                    serial_number: parentSerial,
+                    device_type: 'mobile',
+                    os: 'iOS/Android',
+                    ip_address: '',
+                });
+                const parent = await qsealService.getLinkedUnits(node.node_id);
+                const units = parent.linked_units || [];
+                if (units.length === 0) {
+                    showScanNotice('warning', `⚠ Box ${parent.name || parentSerial} has no linked units.`);
+                } else {
+                    const results = await Promise.allSettled(
+                        units.map((unit) => pickService.recordPickScan(selectedList.id, unit.serial_number)),
+                    );
+                    let correct = 0;
+                    let sameSku = 0;
+                    let offList = 0;
+                    let failed = 0;
+                    results.forEach((r, i) => {
+                        if (r.status === 'fulfilled') {
+                            const category = classifyPick(r.value, units[i].serial_number);
+                            if (category === 'correct') correct += 1;
+                            else if (category === 'same-sku') sameSku += 1;
+                            else offList += 1;
+                        } else {
+                            failed += 1;
+                        }
+                    });
+                    await refreshDetail(selectedList.id);
+                    const picked = correct + sameSku + offList;
+                    const parts = [`📦 ${parent.name || parentSerial}: ${picked} unit(s) picked`];
+                    if (sameSku > 0) parts.push(`${sameSku} same-SKU (different box)`);
+                    if (offList > 0) parts.push(`${offList} off-list`);
+                    if (failed > 0) parts.push(`${failed} failed`);
+                    showScanNotice(sameSku > 0 || offList > 0 || failed > 0 ? 'warning' : 'success', parts.join(' · '));
+                }
+                return;
+            }
+
+            // Direct item/serial QR → record the pick.
+            await recordSinglePick(qr);
             await refreshDetail(selectedList.id);
-            Alert.alert(
-                'Scanned',
-                `${result.sku} — ${result.scanned_qty} picked (${result.remaining_qty} left)${suggestedBin ? `\n📍 Suggested bin: ${suggestedBin}` : ''}`,
-            );
         } catch (err: any) {
             const detail = err?.response?.data?.detail || err?.message || 'Scan failed';
-            Alert.alert('Scan Failed', detail);
+            showScanNotice('error', `Scan failed: ${detail}`);
         } finally {
             setSubmitting(false);
             setScanText('');
@@ -360,6 +447,15 @@ export default function PickScreen() {
                         {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.scanBtnText}>Scan</Text>}
                     </TouchableOpacity>
                 </View>
+
+                {/* Scan feedback (non-blocking) */}
+                {scanNotice && (
+                    <View style={[styles.scanNotice, scanNotice.type === 'success' ? styles.scanNoticeSuccess : scanNotice.type === 'warning' ? styles.scanNoticeWarning : styles.scanNoticeError]}>
+                        <Text style={[styles.scanNoticeText, scanNotice.type === 'success' ? styles.scanNoticeTextSuccess : scanNotice.type === 'warning' ? styles.scanNoticeTextWarning : styles.scanNoticeTextError]}>
+                            {scanNotice.text}
+                        </Text>
+                    </View>
+                )}
 
                 {/* Worker / actions */}
                 <View style={styles.actionBar}>

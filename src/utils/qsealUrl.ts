@@ -42,3 +42,20 @@ export function extractQSealSerial(qrData: string): string | null {
   } catch {}
   return null;
 }
+
+/**
+ * Extract the serial from a PARENT QSeal URL (/qseal/{SERIAL}), or null.
+ * Only matches the parent pattern so child/GS1 URLs are not misread as boxes.
+ */
+export function extractQSealParentSerial(qrData: string): string | null {
+  const trimmed = qrData.trim();
+  if (!isQSealUrl(trimmed)) return null;
+  try {
+    const pathParts = new URL(trimmed).pathname.split('/').filter(Boolean);
+    const qsealIdx = pathParts.indexOf('qseal');
+    if (qsealIdx !== -1 && qsealIdx + 1 < pathParts.length) {
+      return pathParts[qsealIdx + 1];
+    }
+  } catch {}
+  return null;
+}
