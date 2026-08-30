@@ -1,7 +1,7 @@
 // ============================================================
 // QSeal Service — Scan, Cascade, History
 // ============================================================
-import { coreClient } from './client';
+import { coreClient } from '@/api/client';
 import type {
   QSealScanRequest,
   QSealNode,
@@ -9,7 +9,7 @@ import type {
   QSealMapResponse,
   QSealHistoryResponse,
   QSealParentWithUnits,
-} from '../types';
+} from '@/types';
 
 // ---------- Scan a QSeal (public endpoint) ----------
 export async function scanQSeal(

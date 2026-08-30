@@ -1,13 +1,13 @@
 // ============================================================
 // Pick List Service — List, Detail, Scan, Complete, Cancel, Assign
 // ============================================================
-import { coreClient, identityClient } from './client';
+import { coreClient, identityClient } from '@/api/client';
 import type {
     PickList,
     PickListListResponse,
     PickScanResult,
     Worker,
-} from '../types';
+} from '@/types';
 
 // ---------- List Pick Lists ----------
 export async function getPickLists(params?: {

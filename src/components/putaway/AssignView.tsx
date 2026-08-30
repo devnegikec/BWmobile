@@ -6,9 +6,9 @@ import {
   View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator,
   Modal, StyleSheet, ScrollView,
 } from 'react-native';
-import QrScanner from '../QrScanner';
-import { parseBinQR, lookupBinByQr, BinInfo } from './binScanner';
-import { isQSealUrl } from './qrHelpers';
+import QrScanner from '@/components/QrScanner';
+import { parseBinQR, lookupBinByQr, BinInfo } from '@/components/putaway/binScanner';
+import { isQSealUrl } from '@/components/putaway/qrHelpers';
 
 export interface AssignViewRenderContext {
   bin: BinInfo | null;

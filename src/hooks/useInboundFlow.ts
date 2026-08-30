@@ -3,12 +3,12 @@
 // ============================================================
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import { useInboundStore } from '../store/inboundStore';
-import * as qsealService from '../api/qsealService';
-import { getAsnReceivingSummary, cancelInboundSession } from '../api/inboundService';
-import { extractQSealSerial } from '../utils/qsealUrl';
-import type { AsnReceivingSummary, InboundScanExceptionInput } from '../types';
+import { useAuthStore } from '@/store/authStore';
+import { useInboundStore } from '@/store/inboundStore';
+import * as qsealService from '@/api/qsealService';
+import { getAsnReceivingSummary, cancelInboundSession } from '@/api/inboundService';
+import { extractQSealSerial } from '@/utils/qsealUrl';
+import type { AsnReceivingSummary, InboundScanExceptionInput } from '@/types';
 
 export type InboundStep = 'idle' | 'scanning' | 'summary' | 'slip_generated';
 

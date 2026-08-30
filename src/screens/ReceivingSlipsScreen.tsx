@@ -12,10 +12,10 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import * as inboundService from '../api/inboundService';
-import * as putawayService from '../api/putawayService';
-import type { ReceivingSlip } from '../types';
+import { useAuthStore } from '@/store/authStore';
+import * as inboundService from '@/api/inboundService';
+import * as putawayService from '@/api/putawayService';
+import type { ReceivingSlip } from '@/types';
 
 export default function ReceivingSlipsScreen({ navigation }: any) {
   const { selectedWarehouse, worker } = useAuthStore();

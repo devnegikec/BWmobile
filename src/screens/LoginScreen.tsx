@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore } from '@/store/authStore';
 
 export default function LoginScreen({ navigation }: any) {
   const { loginWithPassword, isLoading, error, clearError } = useAuthStore();

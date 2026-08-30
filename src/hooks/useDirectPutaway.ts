@@ -3,10 +3,10 @@
 // ============================================================
 import { useState, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
-import * as putawayService from '../api/putawayService';
-import * as qsealService from '../api/qsealService';
-import { extractSerial, isQSealUrl } from '../components/putaway/qrHelpers';
-import type { TrackingItem } from '../types';
+import * as putawayService from '@/api/putawayService';
+import * as qsealService from '@/api/qsealService';
+import { extractSerial, isQSealUrl } from '@/components/putaway/qrHelpers';
+import type { TrackingItem } from '@/types';
 
 // ── Types ──
 export interface TableRow {

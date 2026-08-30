@@ -1,7 +1,7 @@
 // ============================================================
 // Pick list (outbound) types
 // ============================================================
-import type { Pagination } from './common';
+import type { Pagination } from '@/types/common';
 
 export type PickListStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled';
 

@@ -2,11 +2,11 @@
 // Inbound Screen — Thin wrapper: selects view based on flow step
 // ============================================================
 import React from 'react';
-import { useInboundFlow } from '../hooks/useInboundFlow';
-import StartSessionView from '../components/inbound/StartSessionView';
-import InboundScanningView from '../components/inbound/InboundScanningView';
-import SummaryView from '../components/inbound/SummaryView';
-import SlipGeneratedView from '../components/inbound/SlipGeneratedView';
+import { useInboundFlow } from '@/hooks/useInboundFlow';
+import StartSessionView from '@/components/inbound/StartSessionView';
+import InboundScanningView from '@/components/inbound/InboundScanningView';
+import SummaryView from '@/components/inbound/SummaryView';
+import SlipGeneratedView from '@/components/inbound/SlipGeneratedView';
 
 export default function InboundScreen() {
   const flow = useInboundFlow();

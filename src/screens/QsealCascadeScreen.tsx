@@ -14,10 +14,10 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import { useQSealStore } from '../store/qsealStore';
-import QrScanner from '../components/QrScanner';
-import * as qsealService from '../api/qsealService';
+import { useAuthStore } from '@/store/authStore';
+import { useQSealStore } from '@/store/qsealStore';
+import QrScanner from '@/components/QrScanner';
+import * as qsealService from '@/api/qsealService';
 
 type Phase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
 

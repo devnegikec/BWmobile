@@ -11,9 +11,9 @@ import type {
   ItemRejectionState,
   InboundScanExceptionInput,
   QSealParentWithUnits,
-} from '../types';
-import * as inboundService from '../api/inboundService';
-import * as qsealService from '../api/qsealService';
+} from '@/types';
+import * as inboundService from '@/api/inboundService';
+import * as qsealService from '@/api/qsealService';
 
 // ---- Extract the real backend error message. The core-service returns
 // ---- `message` (custom ValidationError) or `detail` (HTTPException / nested),

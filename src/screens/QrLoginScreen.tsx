@@ -10,8 +10,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import QrScanner from '../components/QrScanner';
-import { useAuthStore } from '../store/authStore';
+import QrScanner from '@/components/QrScanner';
+import { useAuthStore } from '@/store/authStore';
 
 export default function QrLoginScreen({ navigation }: any) {
   const { loginWithQRCode, isLoading } = useAuthStore();

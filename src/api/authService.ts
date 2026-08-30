@@ -1,7 +1,7 @@
 // ============================================================
 // Auth Service — Login, QR Login, Token Refresh, Warehouses
 // ============================================================
-import { identityClient, coreClient, saveTokens, clearTokens } from './client';
+import { identityClient, coreClient, saveTokens, clearTokens } from '@/api/client';
 import type {
   LoginRequest,
   LoginResponse,
@@ -10,7 +10,7 @@ import type {
   QRLoginResponse,
   WorkerLoginResponse,
   Warehouse,
-} from '../types';
+} from '@/types';
 
 // ---------- Username/Password Login ----------
 export async function loginWithPassword(payload: LoginRequest): Promise<LoginResponse> {

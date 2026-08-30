@@ -2,7 +2,7 @@
 // Bin QR Scanner — Parse bin QR codes + lookup by QR code
 // Supports: 5-char codes and legacy JSON location payloads
 // ============================================================
-import { coreClient } from '../../api/client';
+import { coreClient } from '@/api/client';
 
 export interface BinInfo {
   location_id: string;   // UUID for API calls
