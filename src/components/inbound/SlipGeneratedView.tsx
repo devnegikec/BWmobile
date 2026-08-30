@@ -14,6 +14,13 @@ interface Props {
 }
 
 export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSession }: Props) {
+  // The API returns either the newer grouped format (`groups`) or the
+  // legacy flat format (`items`). Normalize both into a single list so
+  // the success screen shows item rows regardless of response shape.
+  const slipItems = slip.groups?.length
+    ? slip.groups.flatMap((group) => group.items)
+    : (slip.items ?? []);
+
   return (
     <ScreenContainer
       title="Receiving Slip"
@@ -35,8 +42,8 @@ export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSessi
 
       {/* Slip Items */}
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionCardTitle}>Items ({slip.items?.length || 0})</Text>
-        {slip.items?.map((item) => (
+        <Text style={styles.sectionCardTitle}>Items ({slipItems.length})</Text>
+        {slipItems.map((item) => (
           <View key={item.id} style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemSku}>{item.sku}</Text>
