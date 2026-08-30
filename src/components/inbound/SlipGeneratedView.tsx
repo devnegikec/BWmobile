@@ -3,9 +3,9 @@
 // ============================================================
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import ScreenContainer from '../ScreenContainer';
-import LinkedUnitsTable from './LinkedUnitsTable';
-import type { ReceivingSlip, QSealParentWithUnits } from '../../types';
+import ScreenContainer from '@/components/ScreenContainer';
+import LinkedUnitsTable from '@/components/inbound/LinkedUnitsTable';
+import type { ReceivingSlip, QSealParentWithUnits } from '@/types';
 
 interface Props {
   slip: ReceivingSlip;

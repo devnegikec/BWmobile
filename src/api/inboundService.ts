@@ -1,7 +1,7 @@
 // ============================================================
 // Inbound Service — Sessions, Scans, Receiving Slips, ASN
 // ============================================================
-import { coreClient } from './client';
+import { coreClient } from '@/api/client';
 import type {
   InboundSession,
   StartSessionRequest,
@@ -17,7 +17,7 @@ import type {
   RejectItemRequest,
   InboundException,
   InboundScanExceptionInput,
-} from '../types';
+} from '@/types';
 
 // ---------- Start Scan Session ----------
 export async function startInboundSession(
@@ -274,8 +274,8 @@ export async function resolveFloatingItem(
 export async function getFifoBins(
   slipId: string,
   itemId: string
-): Promise<import('../types').FifoBinResponse> {
-  const { data } = await coreClient.get<import('../types').FifoBinResponse>(
+): Promise<import('@/types').FifoBinResponse> {
+  const { data } = await coreClient.get<import('@/types').FifoBinResponse>(
     `/inbound/receiving-slips/${slipId}/items/${itemId}/fifo-bins`
   );
   return data;
@@ -285,9 +285,9 @@ export async function getFifoBins(
 export async function assignBinToSlipItem(
   slipId: string,
   itemId: string,
-  payload: import('../types').AssignBinRequest
-): Promise<import('../types').AssignBinResponse> {
-  const { data } = await coreClient.post<import('../types').AssignBinResponse>(
+  payload: import('@/types').AssignBinRequest
+): Promise<import('@/types').AssignBinResponse> {
+  const { data } = await coreClient.post<import('@/types').AssignBinResponse>(
     `/inbound/receiving-slips/${slipId}/items/${itemId}/assign-bin`,
     payload
   );
@@ -296,10 +296,10 @@ export async function assignBinToSlipItem(
 
 // ---------- Register Vehicle Arrival (HC-03) ----------
 export async function registerVehicleArrival(
-  payload: import('../types').VehicleArrivalCreatePayload
-): Promise<import('../types').VehicleArrival> {
+  payload: import('@/types').VehicleArrivalCreatePayload
+): Promise<import('@/types').VehicleArrival> {
   console.log('[API] POST /vehicle-arrivals — payload:', JSON.stringify(payload));
-  const { data } = await coreClient.post<import('../types').VehicleArrival>(
+  const { data } = await coreClient.post<import('@/types').VehicleArrival>(
     '/vehicle-arrivals',
     payload
   );

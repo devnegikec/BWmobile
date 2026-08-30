@@ -4,8 +4,8 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import QrScanner from '../QrScanner';
-import type { AsnReceivingSummary, InboundExceptionClassification, InboundExceptionDestination, InboundScanExceptionInput, InboundSession, ScanRecord } from '../../types';
+import QrScanner from '@/components/QrScanner';
+import type { AsnReceivingSummary, InboundExceptionClassification, InboundExceptionDestination, InboundScanExceptionInput, InboundSession, ScanRecord } from '@/types';
 
 const REASON_BY_CLASSIFICATION: Record<InboundExceptionClassification, string> = {
   short: 'SHORT_PHYSICAL',

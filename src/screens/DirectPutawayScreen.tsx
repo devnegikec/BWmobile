@@ -3,11 +3,11 @@
 // ============================================================
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import { useDirectPutaway } from '../hooks/useDirectPutaway';
-import { ScanningView } from '../components/putaway/ScanningView';
-import { AssignTable } from '../components/putaway/AssignTable';
-import AssignView from '../components/putaway/AssignView';
+import { useAuthStore } from '@/store/authStore';
+import { useDirectPutaway } from '@/hooks/useDirectPutaway';
+import { ScanningView } from '@/components/putaway/ScanningView';
+import { AssignTable } from '@/components/putaway/AssignTable';
+import AssignView from '@/components/putaway/AssignView';
 
 export default function DirectPutawayScreen({ navigation }: any) {
   const { selectedWarehouse, user, worker } = useAuthStore();

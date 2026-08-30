@@ -2,7 +2,7 @@
 // QSeal Store — Zustand store for Parent-Child cascade flow
 // ============================================================
 import { create } from 'zustand';
-import * as qsealService from '../api/qsealService';
+import * as qsealService from '@/api/qsealService';
 
 // ---- Safe error message extractor (prevents "[object Object]" crashes) ----
 function getErrorMessage(err: any): string {

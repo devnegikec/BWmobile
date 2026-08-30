@@ -10,9 +10,9 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import ScreenContainer from '../ScreenContainer';
-import { useInboundStore } from '../../store/inboundStore';
-import type { SessionSummary, InboundSession, QSealParentWithUnits } from '../../types';
+import ScreenContainer from '@/components/ScreenContainer';
+import { useInboundStore } from '@/store/inboundStore';
+import type { SessionSummary, InboundSession, QSealParentWithUnits } from '@/types';
 
 interface Props {
   sessionSummary: SessionSummary;

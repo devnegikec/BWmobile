@@ -13,9 +13,9 @@
 // '../types' keep working unchanged.
 // ============================================================
 
-export * from './auth';
-export * from './common';
-export * from './inbound';
-export * from './pick';
-export * from './putaway';
-export * from './qseal';
+export * from '@/types/auth';
+export * from '@/types/common';
+export * from '@/types/inbound';
+export * from '@/types/pick';
+export * from '@/types/putaway';
+export * from '@/types/qseal';

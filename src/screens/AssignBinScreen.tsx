@@ -12,9 +12,9 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import QrScanner from '../components/QrScanner';
-import * as binService from '../api/binService';
+import { useAuthStore } from '@/store/authStore';
+import QrScanner from '@/components/QrScanner';
+import * as binService from '@/api/binService';
 
 type ScreenPhase = 'idle' | 'scanning' | 'review' | 'submitting' | 'success';
 

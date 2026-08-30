@@ -16,12 +16,12 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAuthStore } from '../store/authStore';
-import * as putawayService from '../api/putawayService';
-import AssignView from '../components/putaway/AssignView';
-import type { BinInfo } from '../components/putaway/binScanner';
-import type { PutAwayList, PutAwayItem } from '../types';
-import type { RootStackParamList } from '../navigation/AppNavigator';
+import { useAuthStore } from '@/store/authStore';
+import * as putawayService from '@/api/putawayService';
+import AssignView from '@/components/putaway/AssignView';
+import type { BinInfo } from '@/components/putaway/binScanner';
+import type { PutAwayList, PutAwayItem } from '@/types';
+import type { RootStackParamList } from '@/navigation/AppNavigator';
 
 type ViewMode = 'list' | 'detail';
 

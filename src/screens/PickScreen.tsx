@@ -15,11 +15,11 @@ import {
     TextInput,
     ScrollView,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import * as pickService from '../api/pickService';
-import QrScanner from '../components/QrScanner';
-import { parseBinQR, lookupBinByQr } from '../components/putaway/binScanner';
-import type { PickList, PickListSummary, PickListItem, PickSerialDetail, Worker } from '../types';
+import { useAuthStore } from '@/store/authStore';
+import * as pickService from '@/api/pickService';
+import QrScanner from '@/components/QrScanner';
+import { parseBinQR, lookupBinByQr } from '@/components/putaway/binScanner';
+import type { PickList, PickListSummary, PickListItem, PickSerialDetail, Worker } from '@/types';
 
 type ViewMode = 'list' | 'detail';
 

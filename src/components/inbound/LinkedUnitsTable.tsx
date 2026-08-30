@@ -3,7 +3,7 @@
 // ============================================================
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import type { QSealParentWithUnits } from '../../types';
+import type { QSealParentWithUnits } from '@/types';
 
 export default function LinkedUnitsTable({ parents }: { parents: QSealParentWithUnits[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

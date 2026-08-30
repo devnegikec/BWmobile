@@ -1,7 +1,7 @@
 // ============================================================
 // QSeal types
 // ============================================================
-import type { Pagination } from './common';
+import type { Pagination } from '@/types/common';
 
 export interface QSealScanRequest {
   serial_number: string;

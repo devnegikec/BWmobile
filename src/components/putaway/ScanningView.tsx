@@ -3,8 +3,8 @@
 // ============================================================
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import QrScanner from '../QrScanner';
-import ScreenContainer from '../ScreenContainer';
+import QrScanner from '@/components/QrScanner';
+import ScreenContainer from '@/components/ScreenContainer';
 
 interface Props {
   warehouseName: string;

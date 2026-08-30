@@ -1,7 +1,7 @@
 // ============================================================
 // Put-Away Service — Generate, List, Complete (QR-based dual-axis)
 // ============================================================
-import { coreClient } from './client';
+import { coreClient } from '@/api/client';
 import type {
   PutAwayList,
   PutAwayItem,
@@ -9,7 +9,7 @@ import type {
   TrackingItem,
   CompletePutawayRequest,
   CompletePutawayResponse,
-} from '../types';
+} from '@/types';
 
 // ---------- Generate Put-Away List from Receiving Slip ----------
 export async function generatePutAwayFromSlip(

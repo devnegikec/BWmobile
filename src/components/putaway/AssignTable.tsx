@@ -3,7 +3,7 @@
 // ============================================================
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import type { TableRow } from '../../hooks/useDirectPutaway';
+import type { TableRow } from '@/hooks/useDirectPutaway';
 
 interface Props {
   rows: TableRow[];

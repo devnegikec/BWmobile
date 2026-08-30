@@ -8,18 +8,18 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import LoginScreen from '../screens/LoginScreen';
-import QrLoginScreen from '../screens/QrLoginScreen';
-import DashboardScreen from '../screens/DashboardScreen';
-import InboundScreen from '../screens/InboundScreen';
-import PutawayScreen from '../screens/PutawayScreen';
-import PickScreen from '../screens/PickScreen';
-import DirectPutawayScreen from '../screens/DirectPutawayScreen';
-import AssignBinScreen from '../screens/AssignBinScreen';
-import ReceivingSlipsScreen from '../screens/ReceivingSlipsScreen';
-import InboundExceptionsScreen from '../screens/InboundExceptionsScreen';
-import QsealCascadeScreen from '../screens/QsealCascadeScreen';
-import { useAuthStore } from '../store/authStore';
+import LoginScreen from '@/screens/LoginScreen';
+import QrLoginScreen from '@/screens/QrLoginScreen';
+import DashboardScreen from '@/screens/DashboardScreen';
+import InboundScreen from '@/screens/InboundScreen';
+import PutawayScreen from '@/screens/PutawayScreen';
+import PickScreen from '@/screens/PickScreen';
+import DirectPutawayScreen from '@/screens/DirectPutawayScreen';
+import AssignBinScreen from '@/screens/AssignBinScreen';
+import ReceivingSlipsScreen from '@/screens/ReceivingSlipsScreen';
+import InboundExceptionsScreen from '@/screens/InboundExceptionsScreen';
+import QsealCascadeScreen from '@/screens/QsealCascadeScreen';
+import { useAuthStore } from '@/store/authStore';
 
 // ---------- Type Definitions ----------
 export type AuthStackParamList = {

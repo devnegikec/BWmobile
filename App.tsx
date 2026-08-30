@@ -4,8 +4,8 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import AppNavigator from './src/navigation/AppNavigator';
-import { useAuthStore } from './src/store/authStore';
+import AppNavigator from '@/navigation/AppNavigator';
+import { useAuthStore } from '@/store/authStore';
 
 export default function App() {
   const checkAuth = useAuthStore((s) => s.checkAuth);

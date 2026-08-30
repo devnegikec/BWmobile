@@ -1,7 +1,7 @@
 // ============================================================
 // Bin Service — Bin stock operations for Assign Bin workflow
 // ============================================================
-import { coreClient } from './client';
+import { coreClient } from '@/api/client';
 
 // ---------- Types ----------
 export interface BinStockItem {

@@ -12,8 +12,8 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
-import ScreenContainer from '../ScreenContainer';
-import type { AsnOrder } from '../../types';
+import ScreenContainer from '@/components/ScreenContainer';
+import type { AsnOrder } from '@/types';
 
 interface Props {
   warehouseName: string;

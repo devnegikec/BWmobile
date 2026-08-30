@@ -14,9 +14,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAuthStore } from '../store/authStore';
-import * as inboundService from '../api/inboundService';
-import type { InboundException } from '../types';
+import { useAuthStore } from '@/store/authStore';
+import * as inboundService from '@/api/inboundService';
+import type { InboundException } from '@/types';
 
 type Disposition = 'release_to_receiving' | 'move_to_hold' | 'move_to_quarantine' | 'return_to_sender' | 'dispose';
 
