@@ -6,6 +6,7 @@ import React, { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import * as binService from '@/api/binService';
+import { getBackendErrorMessage } from '@/utils/errors';
 import IdleView from '@/components/assignBin/IdleView';
 import ScanningView from '@/components/assignBin/ScanningView';
 import ReviewView from '@/components/assignBin/ReviewView';
@@ -122,18 +123,6 @@ export default function AssignBinScreen() {
 
   const binLocked = binInfo !== null;
 
-  // ============ Safe error extractor ============
-
-  const getErrorMessage = (err: any): string => {
-    const detail = err?.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    if (typeof detail === 'object' && detail !== null) {
-      return detail.message || detail.error || JSON.stringify(detail);
-    }
-    if (typeof err?.message === 'string') return err.message;
-    return 'Something went wrong. Please try again.';
-  };
-
   // ============ Scanner handler — auto-detect bin vs item ============
 
   const handleScan = useCallback(
@@ -224,7 +213,7 @@ export default function AssignBinScreen() {
     const failed = results
       .map((result, i) =>
         result.status === 'rejected'
-          ? `${items[i].sku}: ${getErrorMessage(result.reason)}`
+          ? `${items[i].sku}: ${getBackendErrorMessage(result.reason) || 'Something went wrong. Please try again.'}`
           : null
       )
       .filter((msg): msg is string => msg !== null);
