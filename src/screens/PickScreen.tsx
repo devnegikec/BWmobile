@@ -247,10 +247,13 @@ export default function PickScreen() {
                 if (units.length === 0) {
                     showScanNotice('warning', `⚠ Box ${parent.name || parentSerial} has no linked units.`);
                 } else {
-                    // Backend resolves the serial via ProductItem.serial_number → Item,
-                    // so send the bare serial (not product_item_url or a batch payload).
-                    // Scans run sequentially so each pick line is matched and committed
-                    // one at a time (parallel scans race on "first remaining line").
+                    // Each linked unit's serial_number is the ProductItem serial
+                    // (the same value the inbound flow scans), so send the bare
+                    // serial. The outbound scan endpoint resolves it against
+                    // ProductItem with the pick list's organization scope.
+                    // Scans run sequentially so each pick line is matched and
+                    // committed one at a time (parallel scans race on "first
+                    // remaining line").
                     let correct = 0;
                     let sameSku = 0;
                     let offList = 0;
