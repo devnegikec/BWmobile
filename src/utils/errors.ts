@@ -8,14 +8,15 @@
 //   - { detail: "string" }              → HTTPException
 //   - { detail: { message, error } }   → nested error object
 //   - { message: "string" }             → custom ValidationError
-//   - { detail: [...] }                → FastAPI validation array
+//   - { detail: [{ loc, msg, type }] } → FastAPI validation array
 // This helper normalises all of them to a plain string.
 
 /**
  * Extract the backend error message from an Axios/HTTP error.
  *
  * Checks (in priority order):
- *   1. `err.response.data.detail`  — FastAPI HTTPException (string or object)
+ *   1. `err.response.data.detail`  — FastAPI HTTPException (string, object,
+ *      or array of `{ loc, msg, type }` validation errors)
  *   2. `err.response.data.message` — custom ValidationError
  *   3. `err.message`               — Axios / network error fallback
  *
@@ -27,6 +28,23 @@ export function getBackendErrorMessage(err: any): string {
   const detail = data?.detail;
 
   if (typeof detail === 'string' && detail.trim()) return detail;
+
+  // FastAPI's default validation responses return `detail` as an array of
+  // { loc, msg, type } entries. Surface each entry's human-readable `msg`
+  // instead of JSON.stringify-ing the raw array.
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((entry: any) => {
+        if (!entry || typeof entry !== 'object') return '';
+        if (typeof entry.msg === 'string' && entry.msg.trim()) return entry.msg;
+        if (typeof entry.message === 'string' && entry.message.trim()) return entry.message;
+        return '';
+      })
+      .filter((m: string) => m.trim());
+    if (messages.length > 0) return messages.join('; ');
+    return JSON.stringify(detail);
+  }
+
   if (detail && typeof detail === 'object') {
     return detail.message || detail.error || JSON.stringify(detail);
   }
