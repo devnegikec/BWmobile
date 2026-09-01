@@ -6,7 +6,7 @@ import { Alert } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import { useInboundStore } from '@/store/inboundStore';
 import * as qsealService from '@/api/qsealService';
-import { getAsnReceivingSummary, cancelInboundSession } from '@/api/inboundService';
+import { getAsnReceivingSummary, cancelInboundSession, removeScanItems } from '@/api/inboundService';
 import { extractQSealSerial } from '@/utils/qsealUrl';
 import type { AsnReceivingSummary, InboundScanExceptionInput } from '@/types';
 
@@ -192,9 +192,9 @@ export function useInboundFlow() {
       return;
     }
 
-    // Prevent duplicate QSeal scans
+    // Prevent duplicate QSeal scans — silently ignore re-scans.
     if (scannedQSealSerials.has(serial)) {
-      Alert.alert('Duplicate', `QSeal "${serial}" has already been scanned in this session.`);
+      console.log('[Inbound] duplicate QSeal ignored:', serial);
       return;
     }
 
@@ -247,13 +247,58 @@ export function useInboundFlow() {
       try {
         await recordScan(data);
         await refreshReconciliation();
+        // Surface SKUs that are not on this ASN but were accepted into HOLD.
+        const scan = useInboundStore.getState().lastScan;
+        if (scan?.exception_status === 'pending_approval') {
+          Alert.alert(
+            'Not in ASN',
+            `"${scan.sku}" is not on this ASN. It was moved to HOLD for review.`
+          );
+        }
         console.log('[Inbound] recordScan SUCCESS');
       } catch (err: any) {
-        console.log('[Inbound] recordScan FAILED:', {
-          status: err?.response?.status,
-          data: JSON.stringify(err?.response?.data),
-        });
-        Alert.alert('Notice', err.message);
+        const msg = err?.message || '';
+        if (msg.includes('Duplicate')) {
+          // Same item scanned again — silently ignore.
+          console.log('[Inbound] duplicate scan ignored:', data.substring(0, 80));
+        } else {
+          console.log('[Inbound] recordScan FAILED:', { message: msg });
+          Alert.alert('Notice', msg);
+        }
+      }
+    }
+  };
+
+  // Remove a scanned QSeal parent from the session (wrong QR scanned by mistake).
+  const removeParent = async (parentId: string) => {
+    const state = useInboundStore.getState();
+    const parent = state.linkedUnitsParents.find((p) => p.id === parentId);
+    if (!parent) return;
+
+    const childSerials = (parent.linked_units || [])
+      .map((u) => u.serial_number)
+      .filter((s): s is string => !!s);
+
+    // Optimistic local removal — drop the parent and allow re-scanning.
+    if (parent.serial_number) {
+      setScannedQSealSerials((prev) => {
+        const next = new Set(prev);
+        next.delete(parent.serial_number);
+        return next;
+      });
+    }
+    state.removeLinkedUnitsParent(parentId);
+
+    // Delete the recorded child scans on the server.
+    if (state.currentSession && childSerials.length > 0) {
+      try {
+        await removeScanItems(state.currentSession.id, childSerials);
+        await refreshReconciliation();
+      } catch (err: any) {
+        Alert.alert(
+          'Remove Failed',
+          err?.response?.data?.message || err?.message || 'Could not remove items from the server.'
+        );
       }
     }
   };
@@ -379,6 +424,7 @@ export function useInboundFlow() {
     // Actions
     handleStartSession,
     handleScan,
+    removeParent,
     handleViewSummary,
     classifyLastScan,
     handleEndSession,

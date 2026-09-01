@@ -2,7 +2,7 @@
 // SummaryView — Session review with rejection toggles
 // ============================================================
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import ScreenContainer from '@/components/ScreenContainer';
 import { useInboundStore } from '@/store/inboundStore';
 import type { SessionSummary, InboundSession, QSealParentWithUnits } from '@/types';
@@ -17,6 +17,7 @@ interface Props {
   linkedUnitsParents: QSealParentWithUnits[];
   onResumeScanning: () => void;
   onEndSession: () => void;
+  onRemoveParent: (parentId: string) => void;
 }
 
 export default function SummaryView({
@@ -25,6 +26,7 @@ export default function SummaryView({
   linkedUnitsParents,
   onResumeScanning,
   onEndSession,
+  onRemoveParent,
 }: Props) {
   const itemRejections = useInboundStore((s) => s.itemRejections);
   const toggleItemRejection = useInboundStore((s) => s.toggleItemRejection);
@@ -161,6 +163,21 @@ export default function SummaryView({
     return r.parentKey && expandedParents.has(r.parentKey);
   });
 
+  // Helper: remove a scanned QSeal parent (wrong QR scanned by mistake)
+  const handleRemoveParent = (row: TableRow) => {
+    const parentId = row.key.replace('qseal-parent||', '');
+    const parent = linkedUnitsParents.find((p) => p.id === parentId);
+    const itemCount = parent?.linked_units?.length || 0;
+    Alert.alert(
+      'Remove Box',
+      `Remove "${row.productName}"${itemCount > 0 ? ` and its ${itemCount} item(s)` : ''} from this session?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => onRemoveParent(parentId) },
+      ]
+    );
+  };
+
   return (
     <ScreenContainer
       title="Session Summary"
@@ -189,6 +206,7 @@ export default function SummaryView({
         onToggleExpand={toggleExpand}
         onReject={(row) => rejectRow(row, 'Rejected during review')}
         onUnreject={unrejectRow}
+        onRemoveParent={handleRemoveParent}
       />
 
       {/* ---- REJECT LIST ---- */}

@@ -42,6 +42,23 @@ export async function recordScan(
   return data;
 }
 
+// ---------- Remove Scanned Items (wrong parent QR removal) ----------
+export async function removeScanItems(
+  sessionId: string,
+  qrIdentifiers: string[]
+): Promise<{ session_id: string; removed: number; total_boxes_scanned: number }> {
+  const { data } = await coreClient.post<{
+    session_id: string;
+    removed: number;
+    total_boxes_scanned: number;
+  }>(
+    `/inbound/sessions/${sessionId}/remove-scan`,
+    { qr_identifiers: qrIdentifiers },
+    { timeout: 10000 }
+  );
+  return data;
+}
+
 // ---------- Get Session Summary ----------
 export async function getSessionSummary(sessionId: string): Promise<SessionSummary> {
   const { data } = await coreClient.get<SessionSummary>(

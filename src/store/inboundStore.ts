@@ -46,6 +46,7 @@ interface InboundState {
   recordScan: (qrData: string) => Promise<void>;
   fetchLinkedUnits: (parentId: string) => Promise<void>;
   clearLinkedUnits: () => void;
+  removeLinkedUnitsParent: (parentId: string) => void;
   loadSummary: () => Promise<void>;
   endSession: () => Promise<ReceivingSlip>;
   clearSession: () => void;
@@ -242,6 +243,27 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   },
 
   clearLinkedUnits: () => set({ linkedUnitsParents: [] }),
+
+  // ---------- Remove a scanned QSeal parent (wrong QR scanned by mistake) ----------
+  removeLinkedUnitsParent: (parentId) => {
+    set((state) => {
+      const parent = state.linkedUnitsParents.find((p) => p.id === parentId);
+      if (!parent) return state;
+
+      // Drop any rejection state tied to this parent or its children.
+      const nextRejections = { ...state.itemRejections };
+      delete nextRejections[`qseal-parent||${parentId}`];
+      (parent.linked_units || []).forEach((unit) => {
+        delete nextRejections[`qseal-child||${unit.id}`];
+        if (unit.serial_number) delete nextRejections[unit.serial_number];
+      });
+
+      return {
+        linkedUnitsParents: state.linkedUnitsParents.filter((p) => p.id !== parentId),
+        itemRejections: nextRejections,
+      };
+    });
+  },
 
   // ---------- Load Summary ----------
   loadSummary: async () => {
