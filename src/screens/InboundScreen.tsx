@@ -61,6 +61,7 @@ export default function InboundScreen() {
         linkedUnitsParents={flow.linkedUnitsParents}
         onResumeScanning={() => flow.setStep('scanning')}
         onEndSession={flow.handleEndSession}
+        onRemoveParent={flow.removeParent}
       />
     );
   }

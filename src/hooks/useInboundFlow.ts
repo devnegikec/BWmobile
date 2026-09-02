@@ -6,7 +6,7 @@ import { Alert } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import { useInboundStore } from '@/store/inboundStore';
 import * as qsealService from '@/api/qsealService';
-import { getAsnReceivingSummary, cancelInboundSession } from '@/api/inboundService';
+import { getAsnReceivingSummary, cancelInboundSession, removeScanItems } from '@/api/inboundService';
 import { extractQSealSerial } from '@/utils/qsealUrl';
 import type { AsnReceivingSummary, InboundScanExceptionInput } from '@/types';
 
@@ -54,8 +54,10 @@ export function useInboundFlow() {
   const [isReconciliationLoading, setIsReconciliationLoading] = useState(false);
   // Monotonic request id to ignore out-of-order reconciliation responses
   const reconciliationRequestId = useRef(0);
-  // Prevent duplicate QSeal scans
-  const [scannedQSealSerials, setScannedQSealSerials] = useState<Set<string>>(new Set());
+  // Prevent duplicate QSeal scans. A ref (not state) is used because the
+  // duplicate check must read/write synchronously — rapid scans can arrive
+  // before a React state update would propagate.
+  const scannedQSealSerials = useRef<Set<string>>(new Set());
 
   // Sync step with store state
   useEffect(() => {
@@ -192,11 +194,14 @@ export function useInboundFlow() {
       return;
     }
 
-    // Prevent duplicate QSeal scans
-    if (scannedQSealSerials.has(serial)) {
-      Alert.alert('Duplicate', `QSeal "${serial}" has already been scanned in this session.`);
+    // Prevent duplicate QSeal scans — silently ignore re-scans. Claim the
+    // serial synchronously (before any await) so concurrent rapid scans of the
+    // same QSeal cannot both pass this check.
+    if (scannedQSealSerials.current.has(serial)) {
+      console.log('[Inbound] duplicate QSeal ignored:', serial);
       return;
     }
+    scannedQSealSerials.current.add(serial);
 
     setIsProcessingQSeal(true);
     try {
@@ -218,14 +223,14 @@ export function useInboundFlow() {
 
       const unitCount = parentWithUnits.linked_units?.length || 0;
       setIsProcessingQSeal(false);
-      // Mark serial as scanned to prevent duplicates
-      setScannedQSealSerials((prev) => new Set(prev).add(serial)); // 👈 Unblock UI immediately
 
       // Step 3: Record individual scans in the BACKGROUND
       if (unitCount > 0) {
         recordScansInBackground(parentWithUnits.linked_units!);
       }
     } catch (err: any) {
+      // Release the claim so this serial can be retried after the failure.
+      scannedQSealSerials.current.delete(serial);
       const detail = err?.response?.data?.detail || err?.message || '';
       const msg = typeof detail === 'string' ? detail : detail?.message || 'Failed to process QSeal.';
       Alert.alert('QSeal Error', msg);
@@ -245,17 +250,82 @@ export function useInboundFlow() {
       // ---- Regular item QR: record scan directly ----
       console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
       try {
-        await recordScan(data);
+        const scan = await recordScan(data);
         await refreshReconciliation();
+        // Surface SKUs that are not on this ASN but were accepted into HOLD.
+        // Use the scan returned by THIS call (not the shared lastScan) so a
+        // concurrent scan cannot show the wrong SKU or suppress this alert.
+        if (scan?.exception_status === 'pending_approval') {
+          Alert.alert(
+            'Not in ASN',
+            `"${scan.sku}" is not on this ASN. It was moved to HOLD for review.`
+          );
+        }
         console.log('[Inbound] recordScan SUCCESS');
       } catch (err: any) {
-        console.log('[Inbound] recordScan FAILED:', {
-          status: err?.response?.status,
-          data: JSON.stringify(err?.response?.data),
-        });
-        Alert.alert('Notice', err.message);
+        const msg = err?.message || '';
+        if (msg.includes('Duplicate')) {
+          // Same item scanned again — silently ignore.
+          console.log('[Inbound] duplicate scan ignored:', data.substring(0, 80));
+        } else {
+          console.log('[Inbound] recordScan FAILED:', { message: msg });
+          Alert.alert('Notice', msg);
+        }
       }
     }
+  };
+
+  // Remove a scanned QSeal parent from the session (wrong QR scanned by mistake).
+  const removeParent = async (parentId: string) => {
+    const state = useInboundStore.getState();
+    const parent = state.linkedUnitsParents.find((p) => p.id === parentId);
+    if (!parent) return;
+
+    const childSerials = (parent.linked_units || [])
+      .map((u) => u.serial_number)
+      .filter((s): s is string => !!s);
+
+    // Delete the recorded child scans on the server FIRST. Local state is only
+    // removed after the server confirms the deletion — otherwise a failed
+    // request would hide the parent locally while its scans and session totals
+    // remain on the server.
+    if (state.currentSession && childSerials.length > 0) {
+      try {
+        const result = await removeScanItems(state.currentSession.id, childSerials);
+
+        // Sync the authoritative box count returned by the server so session
+        // and summary totals stop counting the deleted boxes/quantity.
+        useInboundStore.setState((s) => ({
+          currentSession: s.currentSession
+            ? { ...s.currentSession, total_boxes_scanned: result.total_boxes_scanned }
+            : s.currentSession,
+        }));
+
+        // Refresh the loaded summary and live reconciliation.
+        await refreshReconciliation();
+        const latest = useInboundStore.getState();
+        if (latest.sessionSummary) {
+          try {
+            await latest.loadSummary();
+          } catch {
+            // Non-fatal — the totals above are already synced.
+          }
+        }
+      } catch (err: any) {
+        Alert.alert(
+          'Remove Failed',
+          err?.response?.data?.message || err?.message || 'Could not remove items from the server.'
+        );
+        return; // Keep the parent locally — nothing was deleted on the server.
+      }
+    }
+
+    // Server deletion succeeded (or there were no child scans) — now drop the
+    // parent locally and allow re-scanning its serial.
+    if (parent.serial_number) {
+      scannedQSealSerials.current.delete(parent.serial_number);
+    }
+    useInboundStore.getState().removeLinkedUnitsParent(parentId);
   };
 
   const handleViewSummary = async () => {
@@ -319,7 +389,7 @@ export function useInboundFlow() {
     setDockLocation('');
     setShowAsnPicker(false);
     setReconciliation(null);
-    setScannedQSealSerials(new Set());
+    scannedQSealSerials.current = new Set();
     setStep('idle');
   };
 
@@ -338,7 +408,7 @@ export function useInboundFlow() {
             setDockLocation('');
             setShowAsnPicker(false);
             setReconciliation(null);
-            setScannedQSealSerials(new Set());
+            scannedQSealSerials.current = new Set();
             setStep('idle');
           },
         },
@@ -379,6 +449,7 @@ export function useInboundFlow() {
     // Actions
     handleStartSession,
     handleScan,
+    removeParent,
     handleViewSummary,
     classifyLastScan,
     handleEndSession,

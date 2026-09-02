@@ -54,7 +54,13 @@ export const styles = StyleSheet.create({
   utColProduct: { flex: 5, minWidth: 0 },
   utColBatch: { flex: 2, minWidth: 0 },
   utColBoxes: { width: 55, alignItems: 'center' as const },
-  utColAction: { width: 62, alignItems: 'flex-end' as const },
+  utColAction: {
+    width: 128,
+    flexDirection: 'row' as const,
+    justifyContent: 'flex-end' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
   utRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -109,6 +115,19 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
+  },
+  utRemoveBtn: {
+    backgroundColor: 'rgba(220,38,38,0.15)',
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  utRemoveBtnText: {
+    color: '#F87171',
+    fontSize: 10,
+    fontWeight: '700',
   },
   utRejectBtnActive: {
     backgroundColor: '#EF4444',

@@ -13,6 +13,7 @@ interface SummaryTableProps {
   onToggleExpand: (key: string) => void;
   onReject: (row: TableRow) => void;
   onUnreject: (row: TableRow) => void;
+  onRemoveParent: (row: TableRow) => void;
 }
 
 export default function SummaryTable({
@@ -22,6 +23,7 @@ export default function SummaryTable({
   onToggleExpand,
   onReject,
   onUnreject,
+  onRemoveParent,
 }: SummaryTableProps) {
   return (
     <View style={styles.unifiedTable}>
@@ -94,6 +96,14 @@ export default function SummaryTable({
 
             {/* Col 4: Action */}
             <View style={[styles.utCell, styles.utColAction]}>
+              {row.type === 'qseal-parent' && (
+                <TouchableOpacity
+                  style={styles.utRemoveBtn}
+                  onPress={() => onRemoveParent(row)}
+                >
+                  <Text style={styles.utRemoveBtnText}>Remove</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={[styles.utRejectBtn, isRejectedRow && styles.utRejectBtnActive]}
                 onPress={() => {

@@ -43,9 +43,10 @@ interface InboundState {
 
   // Actions
   startSession: (warehouseId: string, dockLocation: string, asnOrderId?: string) => Promise<void>;
-  recordScan: (qrData: string) => Promise<void>;
+  recordScan: (qrData: string) => Promise<ScanRecord | null>;
   fetchLinkedUnits: (parentId: string) => Promise<void>;
   clearLinkedUnits: () => void;
+  removeLinkedUnitsParent: (parentId: string) => void;
   loadSummary: () => Promise<void>;
   endSession: () => Promise<ReceivingSlip>;
   clearSession: () => void;
@@ -177,7 +178,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     const session = get().currentSession;
     if (!session) {
       set({ error: 'No active session.' });
-      return;
+      return null;
     }
     set({ isLoading: true, error: null });
     try {
@@ -207,6 +208,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
           isLoading: false,
         };
       });
+      return scan;
     } catch (error: any) {
       const status = error.response?.status;
       const detail = getBackendErrorMessage(error);
@@ -242,6 +244,27 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   },
 
   clearLinkedUnits: () => set({ linkedUnitsParents: [] }),
+
+  // ---------- Remove a scanned QSeal parent (wrong QR scanned by mistake) ----------
+  removeLinkedUnitsParent: (parentId) => {
+    set((state) => {
+      const parent = state.linkedUnitsParents.find((p) => p.id === parentId);
+      if (!parent) return state;
+
+      // Drop any rejection state tied to this parent or its children.
+      const nextRejections = { ...state.itemRejections };
+      delete nextRejections[`qseal-parent||${parentId}`];
+      (parent.linked_units || []).forEach((unit) => {
+        delete nextRejections[`qseal-child||${unit.id}`];
+        if (unit.serial_number) delete nextRejections[unit.serial_number];
+      });
+
+      return {
+        linkedUnitsParents: state.linkedUnitsParents.filter((p) => p.id !== parentId),
+        itemRejections: nextRejections,
+      };
+    });
+  },
 
   // ---------- Load Summary ----------
   loadSummary: async () => {
