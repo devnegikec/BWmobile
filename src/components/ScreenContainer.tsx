@@ -108,7 +108,7 @@ export default function ScreenContainer({
       )}
 
       {/* ---- Footer home button ---- */}
-      {/* {showHomeButton && (
+      {showHomeButton && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + 8 }]}>
           <TouchableOpacity
             style={styles.homeBtn}
@@ -116,10 +116,10 @@ export default function ScreenContainer({
             activeOpacity={0.7}
           >
             <Text style={styles.homeIcon}>🏠</Text>
-            <Text style={styles.homeText}>Home1</Text>
+            <Text style={styles.homeText}>Home</Text>
           </TouchableOpacity>
         </View>
-      )} */}
+      )}
     </View>
   );
 }

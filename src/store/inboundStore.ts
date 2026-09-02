@@ -43,7 +43,7 @@ interface InboundState {
 
   // Actions
   startSession: (warehouseId: string, dockLocation: string, asnOrderId?: string) => Promise<void>;
-  recordScan: (qrData: string) => Promise<void>;
+  recordScan: (qrData: string) => Promise<ScanRecord | null>;
   fetchLinkedUnits: (parentId: string) => Promise<void>;
   clearLinkedUnits: () => void;
   removeLinkedUnitsParent: (parentId: string) => void;
@@ -178,7 +178,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
     const session = get().currentSession;
     if (!session) {
       set({ error: 'No active session.' });
-      return;
+      return null;
     }
     set({ isLoading: true, error: null });
     try {
@@ -208,6 +208,7 @@ export const useInboundStore = create<InboundState>((set, get) => ({
           isLoading: false,
         };
       });
+      return scan;
     } catch (error: any) {
       const status = error.response?.status;
       const detail = getBackendErrorMessage(error);
