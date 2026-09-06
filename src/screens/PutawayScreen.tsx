@@ -94,6 +94,16 @@ export default function PutawayScreen() {
     }
   };
 
+  // ---------- Re-fetch authoritative state from the server ----------
+  const refreshDetail = useCallback(async (listId: string) => {
+    try {
+      const detail = await putawayService.getPutAwayList(listId);
+      setSelectedList(detail);
+    } catch {
+      // Keep the optimistic local state if the refresh fails.
+    }
+  }, []);
+
   // ---------- Mark items completed in local state ----------
   const markItemsCompleted = (completedIds: string[], binLabel: string) => {
     setSelectedList((prev) => {
@@ -124,10 +134,19 @@ export default function PutawayScreen() {
       await putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id);
       markItemsCompleted([item.id], bin.full_path || bin.location_code || bin.qr_code);
     } catch (err: any) {
-      Alert.alert('Error', err.response?.data?.detail || 'Failed to complete.');
+      const status = err.response?.status;
+      Alert.alert(
+        status === 409 ? 'Already Completed' : 'Error',
+        status === 409
+          ? 'This item was already put away. Refreshing…'
+          : err.response?.data?.detail || 'Failed to complete.'
+      );
     } finally {
       setCompletingId(null);
     }
+    // Re-fetch so the UI converges on server state (e.g. retried items that
+    // were already completed to a different bin).
+    await refreshDetail(selectedList.id);
   };
 
   // ---------- Assign all pending items in a group ----------
@@ -146,6 +165,7 @@ export default function PutawayScreen() {
       .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
+    await refreshDetail(selectedList.id);
   };
 
   // ---------- Assign all pending items ----------
@@ -167,6 +187,9 @@ export default function PutawayScreen() {
       .map((item) => item.id);
     setAssigningAll(false);
     markItemsCompleted(completedIds, binLabel);
+    // Re-fetch authoritative state so the counts match the server even when
+    // some requests were rejected transiently (mobile/web mismatch bug).
+    await refreshDetail(selectedList.id);
     Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
   };
 
@@ -326,14 +349,14 @@ export default function PutawayScreen() {
                 </View>
               </View>
 
-        {/* Warnings */}
-        {selectedList.warnings && selectedList.warnings.length > 0 && (
-          <View style={styles.warningBanner}>
-            {selectedList.warnings.map((w, i) => (
-              <Text key={i} style={styles.warningBannerText}>⚠️ {w}</Text>
-            ))}
-          </View>
-        )}
+              {/* Warnings */}
+              {selectedList.warnings && selectedList.warnings.length > 0 && (
+                <View style={styles.warningBanner}>
+                  {selectedList.warnings.map((w, i) => (
+                    <Text key={i} style={styles.warningBannerText}>⚠️ {w}</Text>
+                  ))}
+                </View>
+              )}
 
               {/* Table header */}
               <View style={styles.tableHeaders}>
@@ -345,124 +368,124 @@ export default function PutawayScreen() {
 
               {/* Grouped rows */}
               {groups.map((group) => {
-            const pendingChildren = group.children.filter((c) => c.status === 'pending');
-            const groupDone = group.children.every((c) => c.status === 'completed' || c.status === 'skipped');
-            const expanded = expandedGroups.has(group.key);
-            const totalQty = pendingChildren.reduce((sum, c) => sum + c.quantity, 0);
-            return (
-              <View key={group.key}>
-                {/* Group (box) row */}
-                <TouchableOpacity
-                  style={styles.tableRow}
-                  activeOpacity={0.7}
-                  onPress={() => toggleGroup(group.key)}
-                >
-                  <View style={[styles.tableCell, styles.colProduct]}>
-                    <Text style={styles.tableName} numberOfLines={1}>
-                      {expanded ? '▼ ' : '▶ '}{group.name}
-                    </Text>
-                    <Text style={styles.tableSku} numberOfLines={1}>{group.sku}</Text>
-                  </View>
-                  <View style={[styles.tableCell, styles.colBatch]}>
-                    <Text style={styles.tableBatch}>—</Text>
-                  </View>
-                  <View style={[styles.tableCell, styles.colQty]}>
-                    <Text style={styles.tableQty}>{totalQty}</Text>
-                  </View>
-                  <View style={[styles.tableCell, styles.colAction]}>
-                    {groupDone ? (
-                      <View style={[styles.badge, styles.badgeDone]}>
-                        <Text style={styles.badgeText}>✓</Text>
+                const pendingChildren = group.children.filter((c) => c.status === 'pending');
+                const groupDone = group.children.every((c) => c.status === 'completed' || c.status === 'skipped');
+                const expanded = expandedGroups.has(group.key);
+                const totalQty = pendingChildren.reduce((sum, c) => sum + c.quantity, 0);
+                return (
+                  <View key={group.key}>
+                    {/* Group (box) row */}
+                    <TouchableOpacity
+                      style={styles.tableRow}
+                      activeOpacity={0.7}
+                      onPress={() => toggleGroup(group.key)}
+                    >
+                      <View style={[styles.tableCell, styles.colProduct]}>
+                        <Text style={styles.tableName} numberOfLines={1}>
+                          {expanded ? '▼ ' : '▶ '}{group.name}
+                        </Text>
+                        <Text style={styles.tableSku} numberOfLines={1}>{group.sku}</Text>
                       </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.assignBtn}
-                        onPress={() => {
-                          if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
-                          handleAssignGroup(group, ctx.bin);
-                        }}
-                        disabled={assigningAll}
-                      >
-                        {assigningAll ? (
-                          <ActivityIndicator size="small" color="#fff" />
+                      <View style={[styles.tableCell, styles.colBatch]}>
+                        <Text style={styles.tableBatch}>—</Text>
+                      </View>
+                      <View style={[styles.tableCell, styles.colQty]}>
+                        <Text style={styles.tableQty}>{totalQty}</Text>
+                      </View>
+                      <View style={[styles.tableCell, styles.colAction]}>
+                        {groupDone ? (
+                          <View style={[styles.badge, styles.badgeDone]}>
+                            <Text style={styles.badgeText}>✓</Text>
+                          </View>
                         ) : (
-                          <Text style={styles.assignBtnText}>Assign ({pendingChildren.length})</Text>
+                          <TouchableOpacity
+                            style={styles.assignBtn}
+                            onPress={() => {
+                              if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                              handleAssignGroup(group, ctx.bin);
+                            }}
+                            disabled={assigningAll}
+                          >
+                            {assigningAll ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <Text style={styles.assignBtnText}>Assign ({pendingChildren.length})</Text>
+                            )}
+                          </TouchableOpacity>
                         )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </TouchableOpacity>
-
-                {/* Child rows */}
-                {expanded &&
-                  group.children.map((child) => {
-                    const isDone = child.status === 'completed';
-                    const isSkipped = child.status === 'skipped';
-                    return (
-                      <View
-                        key={child.id}
-                        style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
-                      >
-                        <View style={[styles.tableCell, styles.colProduct]}>
-                          <Text style={styles.tableChildName} numberOfLines={1}>
-                            {'   '}{child.batch_number || child.sku || group.name}
-                          </Text>
-                        </View>
-                        <View style={[styles.tableCell, styles.colBatch]}>
-                          <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number || '—'}</Text>
-                        </View>
-                        <View style={[styles.tableCell, styles.colQty]}>
-                          <Text style={styles.tableQty}>{child.quantity}</Text>
-                        </View>
-                        <View style={[styles.tableCell, styles.colAction]}>
-                          {isDone ? (
-                            <View style={[styles.badge, styles.badgeDone]}>
-                              <Text style={styles.badgeText}>✓</Text>
-                            </View>
-                          ) : isSkipped ? (
-                            <View style={[styles.badge, styles.badgeSkipped]}>
-                              <Text style={styles.badgeText}>✕</Text>
-                            </View>
-                          ) : (
-                            <View style={styles.actionRow}>
-                              <TouchableOpacity
-                                style={styles.assignBtn}
-                                onPress={() => {
-                                  if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
-                                  handleAssignItem(child, ctx.bin);
-                                }}
-                                disabled={completingId === child.id}
-                              >
-                                {completingId === child.id ? (
-                                  <ActivityIndicator size="small" color="#fff" />
-                                ) : (
-                                  <Text style={styles.assignBtnText}>Assign</Text>
-                                )}
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={styles.skipBtnSmall}
-                                onPress={() => handleSkipItem(child)}
-                              >
-                                <Text style={styles.skipBtnSmallText}>✕</Text>
-                              </TouchableOpacity>
-                            </View>
-                          )}
-                        </View>
                       </View>
-                    );
-                  })}
-              </View>
-            );
-          })}
+                    </TouchableOpacity>
 
-        {/* All done state */}
-        {allDone && (
-          <View style={styles.allDoneBanner}>
-            <Text style={styles.allDoneText}>
-              🎉 All items put away! This list is complete and has been synced to the backend.
-            </Text>
-          </View>
-        )}
+                    {/* Child rows */}
+                    {expanded &&
+                      group.children.map((child) => {
+                        const isDone = child.status === 'completed';
+                        const isSkipped = child.status === 'skipped';
+                        return (
+                          <View
+                            key={child.id}
+                            style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
+                          >
+                            <View style={[styles.tableCell, styles.colProduct]}>
+                              <Text style={styles.tableChildName} numberOfLines={1}>
+                                {'   '}{child.batch_number || child.sku || group.name}
+                              </Text>
+                            </View>
+                            <View style={[styles.tableCell, styles.colBatch]}>
+                              <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number || '—'}</Text>
+                            </View>
+                            <View style={[styles.tableCell, styles.colQty]}>
+                              <Text style={styles.tableQty}>{child.quantity}</Text>
+                            </View>
+                            <View style={[styles.tableCell, styles.colAction]}>
+                              {isDone ? (
+                                <View style={[styles.badge, styles.badgeDone]}>
+                                  <Text style={styles.badgeText}>✓</Text>
+                                </View>
+                              ) : isSkipped ? (
+                                <View style={[styles.badge, styles.badgeSkipped]}>
+                                  <Text style={styles.badgeText}>✕</Text>
+                                </View>
+                              ) : (
+                                <View style={styles.actionRow}>
+                                  <TouchableOpacity
+                                    style={styles.assignBtn}
+                                    onPress={() => {
+                                      if (!ctx.bin) { Alert.alert('No Bin', 'Scan or enter a bin code first.'); return; }
+                                      handleAssignItem(child, ctx.bin);
+                                    }}
+                                    disabled={completingId === child.id}
+                                  >
+                                    {completingId === child.id ? (
+                                      <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                      <Text style={styles.assignBtnText}>Assign</Text>
+                                    )}
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={styles.skipBtnSmall}
+                                    onPress={() => handleSkipItem(child)}
+                                  >
+                                    <Text style={styles.skipBtnSmallText}>✕</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                  </View>
+                );
+              })}
+
+              {/* All done state */}
+              {allDone && (
+                <View style={styles.allDoneBanner}>
+                  <Text style={styles.allDoneText}>
+                    🎉 All items put away! This list is complete and has been synced to the backend.
+                  </Text>
+                </View>
+              )}
             </View>
           )}
         </AssignView>
