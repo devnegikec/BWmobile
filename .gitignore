@@ -30,3 +30,5 @@ yarn-debug.*
 yarn-error.*
 .env
 env_local
+codeant_pr_comments.py
+.codeant-pr-comments.json
