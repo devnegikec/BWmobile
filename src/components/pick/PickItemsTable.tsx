@@ -7,10 +7,11 @@ import type { PickGroup } from './types';
 interface PickItemsTableProps {
     groups: PickGroup[];
     expandedGroups: Set<string>;
+    suggestedBins?: Record<string, string>;
     onToggleGroup: (key: string) => void;
 }
 
-export default function PickItemsTable({ groups, expandedGroups, onToggleGroup }: PickItemsTableProps) {
+export default function PickItemsTable({ groups, expandedGroups, suggestedBins, onToggleGroup }: PickItemsTableProps) {
     return (
         <>
             <View style={styles.tableHeaders}>
@@ -28,6 +29,9 @@ export default function PickItemsTable({ groups, expandedGroups, onToggleGroup }
                 const bins = Array.from(new Set(
                     group.children.map((c) => c.bin_location_path || c.bin_location_id || '').filter(Boolean),
                 ));
+                const suggested = group.children[0]?.item_id
+                    ? suggestedBins?.[group.children[0].item_id]
+                    : undefined;
                 const serialRows: { serial: PickSerialDetail; bin: string | null }[] = [];
                 const seenSerials = new Set<string>();
                 for (const c of group.children) {
@@ -50,6 +54,11 @@ export default function PickItemsTable({ groups, expandedGroups, onToggleGroup }
                                 {bins.length > 0 && (
                                     <Text style={styles.tableBin} numberOfLines={1}>
                                         📍 {bins[0]}{bins.length > 1 ? ` +${bins.length - 1}` : ''}
+                                    </Text>
+                                )}
+                                {bins.length === 0 && suggested && (
+                                    <Text style={styles.tableBin} numberOfLines={1}>
+                                        📍 Suggested: {suggested}
                                     </Text>
                                 )}
                             </View>

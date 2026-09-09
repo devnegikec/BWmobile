@@ -6,7 +6,9 @@ import type {
     PickList,
     PickListListResponse,
     PickScanResult,
+    PickSettings,
     Worker,
+    PickBinSuggestResponse,
 } from '@/types';
 
 // ---------- List Pick Lists ----------
@@ -26,6 +28,30 @@ export async function getPickLists(params?: {
 export async function getPickList(listId: string): Promise<PickList> {
     const { data } = await coreClient.get<PickList>(`/outbound/${listId}`);
     return data;
+}
+
+// ---------- Get pick settings (require_bin_scan gating) ----------
+export async function getPickSettings(): Promise<PickSettings> {
+    const { data } = await coreClient.get<{ settings: PickSettings }>(
+        '/pick-settings/runtime',
+    );
+    return data.settings ?? {};
+}
+
+// ---------- Suggest bins for a manual pick line ----------
+export async function suggestPickBins(payload: {
+    item_id: string;
+    quantity: number;
+    warehouse_id: string;
+    worker_id: string;
+    batch_number?: string | null;
+    limit?: number;
+}): Promise<PickBinSuggestResponse['suggestions']> {
+    const { data } = await coreClient.post<PickBinSuggestResponse>(
+        '/wms-3d/suggest',
+        { task_type: 'pick', ...payload },
+    );
+    return data.suggestions ?? [];
 }
 
 // ---------- Record a Pick Scan ----------

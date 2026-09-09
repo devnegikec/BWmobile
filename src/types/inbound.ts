@@ -107,7 +107,7 @@ export interface InboundException {
   reason_code: string;
   status: string;
   condition_code: string;
-  destination?: InboundExceptionDestination | 'RECEIVING-STAGE' | null;
+  destination?: InboundExceptionDestination | 'released' | null;
   destination_location_id?: string | null;
   qr_identifier?: string | null;
   sku?: string | null;

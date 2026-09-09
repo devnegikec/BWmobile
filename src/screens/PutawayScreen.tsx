@@ -11,8 +11,6 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '@/store/authStore';
 import * as putawayService from '@/api/putawayService';
 import AssignView from '@/components/putaway/AssignView';
@@ -22,7 +20,6 @@ import SkipReasonModal from '@/components/putaway/SkipReasonModal';
 import { styles } from '@/components/putaway/PutawayScreen.styles';
 import type { BinInfo } from '@/components/putaway/binScanner';
 import type { PutAwayList, PutAwayItem } from '@/types';
-import type { RootStackParamList } from '@/navigation/AppNavigator';
 
 type ViewMode = 'list' | 'detail';
 
@@ -34,7 +31,6 @@ interface PutAwayGroup {
 }
 
 export default function PutawayScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { selectedWarehouse } = useAuthStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -260,21 +256,6 @@ export default function PutawayScreen() {
             <Text style={styles.loadingText}>Loading…</Text>
           </View>
         )}
-        {/* Direct Put-Away button */}
-        <TouchableOpacity
-          style={styles.directPutawayButton}
-          onPress={() => navigation.navigate('DirectPutaway')}
-        >
-          <Text style={styles.directPutawayIcon}>📋</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.directPutawayTitle}>Start Direct Put-Away</Text>
-            <Text style={styles.directPutawaySubtitle}>
-              Scan items & assign bins manually (no pre-generated list needed)
-            </Text>
-          </View>
-          <Text style={styles.directPutawayArrow}>→</Text>
-        </TouchableOpacity>
-
         <FlatList
           style={{ flex: 1 }}
           data={lists}
