@@ -179,8 +179,8 @@ export async function getReceivingSlip(slipId: string): Promise<ReceivingSlip> {
 export async function approveReceivingSlip(
   slipId: string,
   workerId?: string
-): Promise<ReceivingSlip> {
-  const { data } = await coreClient.post<ReceivingSlip>(
+): Promise<{ success: boolean; slip_id: string; status: string; message: string }> {
+  const { data } = await coreClient.post<{ success: boolean; slip_id: string; status: string; message: string }>(
     `/inbound/receiving-slips/${slipId}/approve`,
     workerId ? { worker_id: workerId } : {}
   );

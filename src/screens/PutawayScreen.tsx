@@ -413,7 +413,11 @@ export default function PutawayScreen() {
                               </Text>
                             </View>
                             <View style={[styles.tableCell, styles.colBatch]}>
-                              <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number || '—'}</Text>
+                              <Text style={styles.tableBatch} numberOfLines={1}>
+                                {child.serial_nos && child.serial_nos.length > 0
+                                  ? `${child.serial_nos.length} serials`
+                                  : child.batch_number || '—'}
+                              </Text>
                             </View>
                             <View style={[styles.tableCell, styles.colQty]}>
                               <Text style={styles.tableQty}>{child.quantity}</Text>
