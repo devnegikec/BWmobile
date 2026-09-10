@@ -1,7 +1,7 @@
 // ============================================================
 // Pick Screen — List, scan and complete pick lists (reverse of put-away)
 // ============================================================
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -42,6 +42,8 @@ export default function PickScreen() {
     const [error, setError] = useState<string | null>(null);
     // item_id → suggested bin label for manual-mode lines without an assigned bin
     const [suggestedBins, setSuggestedBins] = useState<Record<string, string>>({});
+    // Guards against stale suggestion responses overwriting a newer list's bins.
+    const suggestRequestRef = useRef(0);
 
     // Org pick setting: whether a bin scan is required (gates the client-side
     // wrong-bin check). Default true keeps the hard stop until settings load.
@@ -116,18 +118,30 @@ export default function PickScreen() {
     // lines, so ask the smart location engine for the best bin per item.
     const loadSuggestedBins = useCallback(async (list: PickList) => {
         if (!worker?.id || !list.warehouse_id) return;
-        const needed: { item_id: string; quantity: number; batch_no: string | null }[] = [];
-        const seen = new Set<string>();
+        const requestId = ++suggestRequestRef.current;
+        setSuggestedBins({});
+
+        // Aggregate needed items by item_id so lines of the same item with
+        // different batches are summed into one request (not reduced to the
+        // first line's batch and quantity).
+        const neededMap = new Map<string, { item_id: string; quantity: number; batch_no: string | null }>();
         for (const item of list.items ?? []) {
             if (item.bin_location_id || item.bin_location_path) continue;
-            if (!item.item_id || seen.has(item.item_id)) continue;
-            seen.add(item.item_id);
-            needed.push({ item_id: item.item_id, quantity: item.qty, batch_no: item.batch_no });
+            if (!item.item_id) continue;
+            const existing = neededMap.get(item.item_id);
+            if (existing) {
+                existing.quantity += item.qty || 0;
+                if (!existing.batch_no) existing.batch_no = item.batch_no;
+            } else {
+                neededMap.set(item.item_id, {
+                    item_id: item.item_id,
+                    quantity: item.qty || 0,
+                    batch_no: item.batch_no,
+                });
+            }
         }
-        if (needed.length === 0) {
-            setSuggestedBins({});
-            return;
-        }
+        const needed = Array.from(neededMap.values());
+        if (needed.length === 0) return;
 
         const map: Record<string, string> = {};
         await Promise.all(needed.map(async (n) => {
@@ -145,6 +159,8 @@ export default function PickScreen() {
                 // Suggestion is best-effort — leave the item without a hint.
             }
         }));
+        // Discard results from an older list selection that finished late.
+        if (requestId !== suggestRequestRef.current) return;
         setSuggestedBins(map);
     }, [worker?.id]);
 
