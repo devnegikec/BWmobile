@@ -28,6 +28,7 @@ export interface PutAwayItem {
   sku: string;
   item_name?: string;
   batch_number: string;
+  serial_nos?: string[] | null;
   quantity: number;
   bin_location_id: string;
   bin_location_code: string;
