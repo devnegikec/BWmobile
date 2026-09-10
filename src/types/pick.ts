@@ -81,3 +81,22 @@ export interface PickListListResponse {
   pick_lists: PickListSummary[];
   pagination: Pagination;
 }
+
+// ---------- Suggested bin (smart location engine) ----------
+export interface PickBinSuggestion {
+  rank: number;
+  bin_id: string;
+  bin_code: string | null;
+  score: number;
+  batch_number: string | null;
+}
+
+export interface PickBinSuggestResponse {
+  suggestions: PickBinSuggestion[];
+}
+
+// ---------- Pick settings (GET /pick-settings/runtime) ----------
+export interface PickSettings {
+  require_bin_scan?: boolean;
+  [key: string]: unknown;
+}

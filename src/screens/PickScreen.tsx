@@ -40,6 +40,12 @@ export default function PickScreen() {
     const [isLoading, setIsLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // item_id → suggested bin label for manual-mode lines without an assigned bin
+    const [suggestedBins, setSuggestedBins] = useState<Record<string, string>>({});
+
+    // Org pick setting: whether a bin scan is required (gates the client-side
+    // wrong-bin check). Default true keeps the hard stop until settings load.
+    const [requireBinScan, setRequireBinScan] = useState(true);
 
     // Scan state
     const [scanText, setScanText] = useState('');
@@ -82,11 +88,65 @@ export default function PickScreen() {
         loadLists();
     }, [loadLists]);
 
+    // Load the org's pick settings once so the client-side wrong-bin check
+    // respects the `require_bin_scan` flag.
+    useEffect(() => {
+        let cancelled = false;
+        pickService
+            .getPickSettings()
+            .then((s) => {
+                if (!cancelled) setRequireBinScan(s.require_bin_scan ?? true);
+            })
+            .catch(() => {
+                // Keep the safe default (true) on failure.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     const onRefresh = async () => {
         setRefreshing(true);
         await loadLists();
         setRefreshing(false);
     };
+
+    // ---------- Suggested bins (manual mode) ----------
+    // Pick lists generated in manual mode have no bin_location_id on their
+    // lines, so ask the smart location engine for the best bin per item.
+    const loadSuggestedBins = useCallback(async (list: PickList) => {
+        if (!worker?.id || !list.warehouse_id) return;
+        const needed: { item_id: string; quantity: number; batch_no: string | null }[] = [];
+        const seen = new Set<string>();
+        for (const item of list.items ?? []) {
+            if (item.bin_location_id || item.bin_location_path) continue;
+            if (!item.item_id || seen.has(item.item_id)) continue;
+            seen.add(item.item_id);
+            needed.push({ item_id: item.item_id, quantity: item.qty, batch_no: item.batch_no });
+        }
+        if (needed.length === 0) {
+            setSuggestedBins({});
+            return;
+        }
+
+        const map: Record<string, string> = {};
+        await Promise.all(needed.map(async (n) => {
+            try {
+                const suggestions = await pickService.suggestPickBins({
+                    item_id: n.item_id,
+                    quantity: Math.max(1, n.quantity || 1),
+                    warehouse_id: list.warehouse_id,
+                    worker_id: worker.id,
+                    batch_number: n.batch_no,
+                    limit: 1,
+                });
+                if (suggestions[0]?.bin_code) map[n.item_id] = suggestions[0].bin_code;
+            } catch {
+                // Suggestion is best-effort — leave the item without a hint.
+            }
+        }));
+        setSuggestedBins(map);
+    }, [worker?.id]);
 
     // ---------- Load Detail ----------
     const handleSelectList = async (list: PickListSummary) => {
@@ -97,6 +157,7 @@ export default function PickScreen() {
             setSelectedList(detail);
             setVerifiedBin(null);
             setViewMode('detail');
+            void loadSuggestedBins(detail);
         } catch {
             Alert.alert('Error', 'Failed to load pick list details.');
         } finally {
@@ -108,8 +169,9 @@ export default function PickScreen() {
         try {
             const detail = await pickService.getPickList(id);
             setSelectedList(detail);
+            void loadSuggestedBins(detail);
         } catch { }
-    }, []);
+    }, [loadSuggestedBins]);
 
     // ---------- Scan feedback helpers (non-blocking) ----------
     const showScanNotice = (type: 'success' | 'warning' | 'error', text: string) => {
@@ -187,7 +249,13 @@ export default function PickScreen() {
                     locationId = resolved.location_id;
                 }
             }
+            // Enforce the wrong-bin check only when the org requires a bin scan
+            // AND the list carries assigned bins (auto mode). When the flag is
+            // off, or the list is manual (no assigned bins), any bin is accepted.
+            const hasAssignedBins = suggestedPaths.size > 0 || suggestedIds.size > 0;
+            const enforceBin = requireBinScan && hasAssignedBins;
             const matches =
+                !enforceBin ||
                 (locationId && suggestedIds.has(locationId)) ||
                 suggestedPaths.has(label) ||
                 suggestedPaths.has(qr) ||
@@ -534,7 +602,7 @@ export default function PickScreen() {
 
                 {/* Items table */}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.tableContent}>
-                    <PickItemsTable groups={groups} expandedGroups={expandedGroups} onToggleGroup={toggleGroup} />
+                    <PickItemsTable groups={groups} expandedGroups={expandedGroups} suggestedBins={suggestedBins} onToggleGroup={toggleGroup} />
                 </ScrollView>
 
                 {/* Footer actions */}
