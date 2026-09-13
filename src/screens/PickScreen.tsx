@@ -26,9 +26,53 @@ import { styles } from '@/components/pick/PickScreen.styles';
 import { extractQSealSerial, extractQSealParentSerial } from '@/utils/qsealUrl';
 import { parseBinQR, lookupBinByQr } from '@/components/putaway/binScanner';
 import type { PickGroup } from '@/components/pick/types';
-import type { PickList, PickListSummary, PickScanResult, Worker } from '@/types';
+import type { PickList, PickListItem, PickListSummary, PickScanResult, Worker } from '@/types';
 
 type ViewMode = 'list' | 'detail';
+
+/**
+ * Normalize a pick-list detail response into the flat `items` shape the screen
+ * renders. New API responses carry `groups` (one group per master pack); older
+ * responses carry a flat `items` array.
+ */
+function normalizePickList(list: PickList): PickList {
+    let items: PickListItem[];
+    if (Array.isArray(list.items) && list.items.length > 0) {
+        items = list.items;
+    } else if (Array.isArray(list.groups) && list.groups.length > 0) {
+        items = list.groups.map((group, index) => {
+            const children = Array.isArray(group.items) ? group.items : [];
+            const first = children[0];
+            const groupQty = children.reduce((s, c) => s + (c.quantity || 0), 0);
+            return {
+                id: group.parent_qseal?.id ?? `group-${index}`,
+                item_id: group.parent_qseal?.id ?? `group-${index}`,
+                item_name: group.product_name ?? first?.sku ?? null,
+                sku: first?.sku ?? group.product_name ?? null,
+                qty: groupQty,
+                picked_qty: group.picked_qty ?? 0,
+                uom: '',
+                per_case_qty: group.parent_qseal?.capacity ?? null,
+                case_qty: group.parent_qseal ? 1 : null,
+                loose_qty: groupQty,
+                batch_no: first?.batch_number ?? null,
+                bin_location_id: group.bin_location_id,
+                bin_location_path: group.bin_location_path ?? null,
+                serials: children
+                    .filter((c) => !!c.serial_number)
+                    .map((c) => ({
+                        serial_number: c.serial_number as string,
+                        sku: c.sku ?? null,
+                        manufacturing_date: c.manufacturing_date ?? null,
+                        expiry_date: c.expiry_date ?? null,
+                    })),
+            };
+        });
+    } else {
+        items = [];
+    }
+    return { ...list, items };
+}
 
 export default function PickScreen() {
     const { selectedWarehouse, user, worker } = useAuthStore();
@@ -170,7 +214,7 @@ export default function PickScreen() {
         setIsLoading(true);
         try {
             const detail = await pickService.getPickList(list.id);
-            setSelectedList(detail);
+            setSelectedList(normalizePickList(detail));
             setVerifiedBin(null);
             setViewMode('detail');
             void loadSuggestedBins(detail);
@@ -184,7 +228,7 @@ export default function PickScreen() {
     const refreshDetail = useCallback(async (id: string) => {
         try {
             const detail = await pickService.getPickList(id);
-            setSelectedList(detail);
+            setSelectedList(normalizePickList(detail));
             void loadSuggestedBins(detail);
         } catch { }
     }, [loadSuggestedBins]);
@@ -196,12 +240,12 @@ export default function PickScreen() {
 
     const classifyPick = (result: PickScanResult, scannedSerial: string): 'correct' | 'same-sku' | 'off-list' => {
         const expectedSerials = new Set(
-            selectedList?.items.flatMap((i) => (i.serials ?? []).map((s) => s.serial_number)) ?? [],
+            (selectedList?.items ?? []).flatMap((i) => (i.serials ?? []).map((s) => s.serial_number)),
         );
         // "Correct box" means the scanned serial is one the pick list actually expects.
         if (expectedSerials.has(scannedSerial)) return 'correct';
         // item_id ↔ SKU is 1:1, so a sku/item_id match means "same product, different box".
-        const skuMatch = !!selectedList?.items.some(
+        const skuMatch = (selectedList?.items ?? []).some(
             (i) => i.sku === result.sku || i.item_id === result.item_id,
         );
         return skuMatch ? 'same-sku' : 'off-list';
@@ -217,7 +261,7 @@ export default function PickScreen() {
         const result = await pickService.recordPickScan(selectedList.id, qrData, binLocationId ?? verifiedBin?.locationId ?? null);
         const serial = scannedSerial ?? extractQSealSerial(qrData) ?? qrData;
         const category = classifyPick(result, serial);
-        const matched = selectedList.items.find(
+        const matched = (selectedList.items ?? []).find(
             (i) => i.sku === result.sku || i.item_id === result.item_id,
         );
         const suggestedBin = matched?.bin_location_path || matched?.bin_location_id || null;
@@ -250,10 +294,10 @@ export default function PickScreen() {
         // Location/bin QR detection — verify against the pick list's suggested bins.
         const binInfo = parseBinQR(qr);
         const suggestedPaths = new Set(
-            selectedList.items.map((i) => i.bin_location_path).filter(Boolean) as string[],
+            (selectedList.items ?? []).map((i) => i.bin_location_path).filter(Boolean) as string[],
         );
         const suggestedIds = new Set(
-            selectedList.items.map((i) => i.bin_location_id).filter(Boolean) as string[],
+            (selectedList.items ?? []).map((i) => i.bin_location_id).filter(Boolean) as string[],
         );
         if (binInfo || suggestedPaths.has(qr) || suggestedIds.has(qr)) {
             let label = binInfo?.full_path || binInfo?.location_code || binInfo?.qr_code || qr;
@@ -280,7 +324,7 @@ export default function PickScreen() {
                 // If the scan only carried a full path (no UUID / no QR-code
                 // lookup), fall back to the suggested line's bin id.
                 if (!locationId) {
-                    const hit = selectedList.items.find(
+                    const hit = (selectedList.items ?? []).find(
                         (i) => i.bin_location_path === qr || i.bin_location_id === qr,
                     );
                     locationId = hit?.bin_location_id || '';
@@ -536,7 +580,7 @@ export default function PickScreen() {
         // Group items by SKU for a collapsible parent → serial table
         const groups: PickGroup[] = [];
         const groupIndex = new Map<string, PickGroup>();
-        for (const item of selectedList.items) {
+        for (const item of selectedList.items ?? []) {
             const key = item.item_id || item.sku || item.id;
             let g = groupIndex.get(key);
             if (!g) {

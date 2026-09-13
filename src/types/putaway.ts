@@ -11,15 +11,22 @@ export interface PutAwayList {
   reference_type?: string;
   reference_id?: string;
   receiving_slip_id: string;
+  receiving_slip_no?: string | null;
   assigned_to?: string | null;
+  worker_id?: string | null;
+  worker_name?: string | null;
   total_items: number;
   completed_items: number;
   pending_items: number;
   remarks?: string | null;
-  warnings: string[];
+  warnings: string[] | null;
   created_at: string;
   updated_at?: string;
-  items: PutAwayItem[];
+  completed_at?: string | null;
+  /** Legacy flat format */
+  items?: PutAwayItem[];
+  /** New grouped format (one group per put-away line / master pack) */
+  groups?: PutAwayGroup[];
 }
 
 export interface PutAwayItem {
@@ -37,6 +44,49 @@ export interface PutAwayItem {
   status: 'pending' | 'completed' | 'skipped';
   notes?: string | null;
   completed_at?: string | null;
+}
+
+export interface PutAwayParentInfo {
+  id: string;
+  serial_number: string | null;
+  name: string | null;
+  qseal_type: string | null;
+  capacity: number | null;
+}
+
+export interface PutAwayGroupItem {
+  serial_number: string | null;
+  sku: string | null;
+  batch_number: string | null;
+  manufacturing_date?: string | null;
+  expiry_date?: string | null;
+  quantity: number;
+  box_count: number;
+}
+
+export interface PutAwayGroup {
+  id: string;
+  item_id: string | null;
+  parent_qseal: PutAwayParentInfo | null;
+  product_name: string | null;
+  bin_location_id: string | null;
+  bin_location_code: string | null;
+  status: string | null;
+  sort_order: number;
+  items: PutAwayGroupItem[];
+}
+
+// ---------- Suggested bin (smart location engine) ----------
+export interface PutAwayBinSuggestion {
+  rank: number;
+  bin_id: string;
+  bin_code: string | null;
+  score: number;
+  batch_number: string | null;
+}
+
+export interface PutAwayBinSuggestResponse {
+  suggestions: PutAwayBinSuggestion[];
 }
 
 // ---------- Dual-Axis Put-Away (QR-based) ----------

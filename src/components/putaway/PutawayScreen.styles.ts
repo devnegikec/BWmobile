@@ -271,8 +271,9 @@ export const styles = StyleSheet.create({
 
   // Detail progress bar
   detailProgressBarWrap: { paddingHorizontal: 24, marginTop: 12, marginBottom: 4 },
-  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3 },
+  detailProgressBar: { height: 6, backgroundColor: '#2A3A4A', borderRadius: 3, overflow: 'hidden' },
   detailProgressFill: { height: 6, backgroundColor: '#1A73E8', borderRadius: 3 },
+  detailProgressLabel: { color: '#8899AA', fontSize: 11, marginTop: 4, textAlign: 'right' },
 
   // Direct Put-Away button
   directPutawayButton: {
