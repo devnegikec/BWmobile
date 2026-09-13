@@ -86,9 +86,11 @@ export default function ReceivingSlipsScreen({ navigation }: any) {
             try {
               const workerId = worker?.id;
               const putaway = await putawayService.generatePutAwayFromSlip(slip.id, workerId);
+              const itemCount =
+                putaway.groups?.length ?? putaway.items?.length ?? putaway.total_items;
               Alert.alert(
                 'Success',
-                `Put-away list ${putaway.put_away_list_no} created with ${putaway.items.length} items.`
+                `Put-away list ${putaway.put_away_list_no} created with ${itemCount} items.`
               );
               loadSlips();
             } catch (err: any) {

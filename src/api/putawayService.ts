@@ -9,6 +9,7 @@ import type {
   TrackingItem,
   CompletePutawayRequest,
   CompletePutawayResponse,
+  PutAwayBinSuggestResponse,
 } from '@/types';
 
 // ---------- Generate Put-Away List from Receiving Slip ----------
@@ -42,6 +43,22 @@ export async function getPutAwayLists(params?: {
 export async function getPutAwayList(listId: string): Promise<PutAwayList> {
   const { data } = await coreClient.get<PutAwayList>(`/put-away/${listId}`);
   return data;
+}
+
+// ---------- Suggest bins for a manual put-away line ----------
+export async function suggestPutAwayBins(payload: {
+  item_id: string;
+  quantity: number;
+  warehouse_id: string;
+  worker_id: string;
+  batch_number?: string | null;
+  limit?: number;
+}): Promise<PutAwayBinSuggestResponse['suggestions']> {
+  const { data } = await coreClient.post<PutAwayBinSuggestResponse>(
+    '/wms-3d/suggest',
+    { task_type: 'put_away', ...payload },
+  );
+  return data.suggestions ?? [];
 }
 
 // ---------- Complete a Put-Away Item ----------

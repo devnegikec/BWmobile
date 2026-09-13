@@ -24,12 +24,14 @@ interface Props {
   onAssignAll: (locationId: string, binLabel: string) => void;
   onScanQSeal?: (data: string) => void;
   onBack: () => void;
+  onComplete?: () => void;
+  canComplete?: boolean;
   children: (ctx: AssignViewRenderContext) => React.ReactNode;
 }
 
 export default function AssignView({
   title, subtitle, isAssigning, doneCount, pendingCount,
-  onAssignAll, onScanQSeal, onBack, children,
+  onAssignAll, onScanQSeal, onBack, onComplete, canComplete, children,
 }: Props) {
   const [binCode, setBinCode] = useState('');
   const [resolvedBin, setResolvedBin] = useState<BinInfo | null>(null);
@@ -174,9 +176,16 @@ export default function AssignView({
 
       {/* ── Persistent footer ── */}
       <View style={styles.footer}>
-        <Text style={styles.footerStat}>✅ {doneCount} done</Text>
-        <View style={styles.footerDivider} />
-        <Text style={styles.footerStat}>⏳ {pendingCount} pending</Text>
+        <View style={styles.footerStats}>
+          <Text style={styles.footerStat}>✅ {doneCount} done</Text>
+          <View style={styles.footerDivider} />
+          <Text style={styles.footerStat}>⏳ {pendingCount} pending</Text>
+        </View>
+        {canComplete && onComplete ? (
+          <TouchableOpacity style={styles.footerCompleteBtn} onPress={onComplete}>
+            <Text style={styles.footerCompleteText}>Complete</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {/* ── Scanner modal ── */}
@@ -245,7 +254,7 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     gap: 12,
     backgroundColor: '#1A2332',
     borderTopWidth: 1,
@@ -253,8 +262,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
+  footerStats: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   footerStat: { color: '#B0C4D8', fontSize: 14, fontWeight: '600' },
   footerDivider: { width: 1, height: 16, backgroundColor: '#2A3A4A' },
+  footerCompleteBtn: {
+    backgroundColor: '#059669',
+    borderRadius: 8,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+  },
+  footerCompleteText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   assignAllBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
