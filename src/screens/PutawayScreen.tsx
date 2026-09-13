@@ -439,14 +439,22 @@ export default function PutawayScreen() {
           text: 'Complete',
           onPress: async () => {
             try {
-              await refreshDetail(selectedList.id);
+              const detail = await putawayService.getPutAwayList(selectedList.id);
+              if (detail.status !== 'completed') {
+                Alert.alert(
+                  'Not Completed',
+                  'This put-away list is not marked complete yet. Please finish all items first.'
+                );
+                return;
+              }
+              setSelectedList(normalizePutAwayList(detail));
+              Alert.alert('Done', 'Put-away list completed.');
+              setViewMode('list');
+              setSelectedList(null);
+              loadLists();
             } catch {
-              // Ignore — the backend auto-completes when the last item is done.
+              Alert.alert('Error', 'Failed to confirm completion. Please try again.');
             }
-            Alert.alert('Done', 'Put-away list completed.');
-            setViewMode('list');
-            setSelectedList(null);
-            loadLists();
           },
         },
       ]

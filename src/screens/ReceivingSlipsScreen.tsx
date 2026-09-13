@@ -86,8 +86,15 @@ export default function ReceivingSlipsScreen({ navigation }: any) {
             try {
               const workerId = worker?.id;
               const putaway = await putawayService.generatePutAwayFromSlip(slip.id, workerId);
+              // Count child units (not master-pack groups) so the success
+              // message reflects the actual number of items put away.
+              const groupUnits = putaway.groups?.reduce(
+                (sum, group) =>
+                  sum + (group.items ?? []).reduce((s, c) => s + (c.quantity || 0), 0),
+                0,
+              );
               const itemCount =
-                putaway.groups?.length ?? putaway.items?.length ?? putaway.total_items;
+                groupUnits || putaway.total_items || putaway.items?.length || 0;
               Alert.alert(
                 'Success',
                 `Put-away list ${putaway.put_away_list_no} created with ${itemCount} items.`
