@@ -120,9 +120,13 @@ export default function PickScreen() {
                 warehouse_id: selectedWarehouse.id,
                 page_size: 50,
             });
-            // Workers only pick draft / in-progress lists
+            // Workers pick draft / confirmed / pending / in-progress lists
             const active = (response.pick_lists || []).filter(
-                (l) => l.status === 'draft' || l.status === 'in_progress',
+                (l) =>
+                    l.status === 'draft' ||
+                    l.status === 'confirmed' ||
+                    l.status === 'pending_picking' ||
+                    l.status === 'in_progress',
             );
             setLists(active);
         } catch {
