@@ -3,7 +3,7 @@
 // ============================================================
 import type { Pagination } from '@/types/common';
 
-export type PickListStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled';
+export type PickListStatus = 'draft' | 'confirmed' | 'pending_picking' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface PickSerialDetail {
   serial_number: string;
