@@ -13,6 +13,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
+import WarehouseSelector from '@/components/WarehouseSelector';
 import * as inboundService from '@/api/inboundService';
 import * as putawayService from '@/api/putawayService';
 import type { ReceivingSlip } from '@/types';
@@ -131,9 +132,8 @@ export default function ReceivingSlipsScreen({ navigation }: any) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Receiving Slips</Text>
-        <Text style={styles.headerSubtitle}>
-          {selectedWarehouse?.name || ''} · {slips.length} slips
-        </Text>
+        <WarehouseSelector style={styles.warehouseSelector} />
+        <Text style={styles.headerSubtitle}>{slips.length} slips</Text>
       </View>
 
       <FlatList
@@ -221,7 +221,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A2332',
   },
   headerTitle: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  headerSubtitle: { color: '#8899AA', fontSize: 14, marginTop: 4 },
+  warehouseSelector: { marginTop: 10 },
+  headerSubtitle: { color: '#8899AA', fontSize: 14, marginTop: 8 },
 
   listContent: { padding: 24, paddingBottom: 40 },
   slipCard: {

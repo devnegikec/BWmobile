@@ -19,10 +19,13 @@ export const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
   },
+  headerSelector: {
+    marginTop: 10,
+  },
   headerSubtitle: {
     color: '#8899AA',
     fontSize: 14,
-    marginTop: 4,
+    marginTop: 8,
   },
 
   // ---- Idle ----

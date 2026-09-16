@@ -13,10 +13,10 @@ import {
   FlatList,
 } from 'react-native';
 import ScreenContainer from '@/components/ScreenContainer';
+import WarehouseSelector from '@/components/WarehouseSelector';
 import type { AsnOrder } from '@/types';
 
 interface Props {
-  warehouseName: string;
   dockLocation: string;
   onDockLocationChange: (value: string) => void;
   selectedAsn: AsnOrder | null;
@@ -32,7 +32,6 @@ interface Props {
 }
 
 export default function StartSessionView({
-  warehouseName,
   dockLocation,
   onDockLocationChange,
   selectedAsn,
@@ -55,9 +54,7 @@ export default function StartSessionView({
       <View style={styles.formContainer}>
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Warehouse</Text>
-          <Text style={styles.readOnlyValue}>
-            {warehouseName || 'No warehouse selected'}
-          </Text>
+          <WarehouseSelector />
         </View>
 
         <View style={styles.inputGroup}>

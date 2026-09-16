@@ -35,15 +35,33 @@ function resolveDevHost(): string | null {
 
 const DEV_HOST = resolveDevHost();
 
-const IDENTITY_BASE_URL =
-  process.env.EXPO_PUBLIC_IDENTITY_URL ||
-  (DEV_HOST ? `http://${DEV_HOST}:8000/api/v1` : 'http://localhost:8000/api/v1');
-const CORE_BASE_URL =
-  process.env.EXPO_PUBLIC_CORE_URL ||
-  (DEV_HOST ? `http://${DEV_HOST}:8001/api/v1` : 'http://localhost:8001/api/v1');
-export const SEARCH_BASE_URL =
-  process.env.EXPO_PUBLIC_SEARCH_URL ||
-  (DEV_HOST ? `http://${DEV_HOST}:8002/api/v1` : 'http://localhost:8002/api/v1');
+// In dev, `localhost` in .env points at the phone itself when running on a
+// physical device (or an Android emulator). Rewrite localhost/127.0.0.1 URLs
+// to the dev machine's LAN IP, auto-detected from Expo's hostUri.
+function resolveServiceUrl(envUrl: string | undefined, port: number): string {
+  if (envUrl) {
+    if (DEV_HOST && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(envUrl)) {
+      return envUrl.replace(/localhost|127\.0\.0\.1/, DEV_HOST);
+    }
+    return envUrl;
+  }
+  return DEV_HOST
+    ? `http://${DEV_HOST}:${port}/api/v1`
+    : `http://localhost:${port}/api/v1`;
+}
+
+const IDENTITY_BASE_URL = resolveServiceUrl(process.env.EXPO_PUBLIC_IDENTITY_URL, 8000);
+const CORE_BASE_URL = resolveServiceUrl(process.env.EXPO_PUBLIC_CORE_URL, 8001);
+export const SEARCH_BASE_URL = resolveServiceUrl(process.env.EXPO_PUBLIC_SEARCH_URL, 8002);
+
+if (__DEV__) {
+  console.log('[api] Resolved service URLs:', {
+    identity: IDENTITY_BASE_URL,
+    core: CORE_BASE_URL,
+    search: SEARCH_BASE_URL,
+    devHost: DEV_HOST,
+  });
+}
 
 // ---------- Request timeout (ms) ----------
 const REQUEST_TIMEOUT = Number(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT) || 15000;
@@ -232,9 +250,26 @@ async function handle401(error: AxiosError) {
 }
 
 // ---------- Register Interceptors ----------
-// Response: auto-refresh on 401
-coreClient.interceptors.response.use((res) => res, handle401);
-identityClient.interceptors.response.use((res) => res, handle401);
+// Log failed requests in dev, then auto-refresh on 401
+function responseErrorHandler(error: AxiosError) {
+  if (__DEV__) {
+    console.warn(
+      `[api] ${error.config?.method?.toUpperCase() ?? 'GET'} ${
+        error.config?.url ?? ''
+      } failed`,
+      {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      }
+    );
+  }
+  return handle401(error);
+}
+
+coreClient.interceptors.response.use((res) => res, responseErrorHandler);
+identityClient.interceptors.response.use((res) => res, responseErrorHandler);
 
 // Request: attach JWT token to authenticated requests
 const PUBLIC_ENDPOINTS = ['/identity/login', '/identity/refresh', '/identity/login/qr-code', '/wms-workers/login/barcode'];

@@ -473,7 +473,7 @@ export default function PutawayScreen() {
 
     return (
       <View style={styles.container}>
-        <PutawayHeader title="Put-Away Lists" subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`} />
+        <PutawayHeader title="Put-Away Lists" subtitle={`${pendingCount} pending · ${selectedWarehouse?.name || ''}`} showWarehouseSelector />
         {error ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>

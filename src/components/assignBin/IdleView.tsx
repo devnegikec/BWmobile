@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { styles } from './AssignBinScreen.styles';
+import WarehouseSelector from '@/components/WarehouseSelector';
 
 interface IdleViewProps {
   onStartScan: () => void;
@@ -11,6 +12,7 @@ export default function IdleView({ onStartScan }: IdleViewProps) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Assign Bin</Text>
+        <WarehouseSelector style={styles.headerSelector} />
         <Text style={styles.headerSubtitle}>Scan bin & items to map stock to a location</Text>
       </View>
 
