@@ -5,6 +5,58 @@ import { create } from 'zustand';
 import type { User, Worker, Warehouse } from '@/types';
 import * as authService from '@/api/authService';
 import { getAccessToken, setOnTokensCleared } from '@/api/client';
+import { getBackendErrorMessage } from '@/utils/errors';
+
+// ------------------------------------------------------------
+// Normalise any backend/network failure into a plain string.
+//
+// The identity/core services return errors in several shapes:
+//   - { detail: "string" }               → FastAPI HTTPException
+//   - { detail: { message, error } }     → nested error object
+//   - { detail: [{ loc, msg, type }] }   → FastAPI validation array (e.g. a
+//                                          malformed email address)
+// Storing a non-string in `error` crashes React the moment it is rendered
+// inside <Text> ("Objects are not valid as a React child"), which is why a
+// failed login previously took the whole app down with no message shown.
+// ------------------------------------------------------------
+function resolveErrorMessage(error: any, fallback: string): string {
+  // Already normalised by us (see `loadWarehouses`) — the message is final,
+  // user-facing copy, so never re-derive it from the payload.
+  if (error?.normalized && typeof error?.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+
+  // Axios reports offline/DNS/timeout failures without an HTTP response.
+  if (error?.isAxiosError && !error?.response) {
+    return 'Cannot reach the server. Check your connection and try again.';
+  }
+
+  // No HTTP response, but a real message was set on the error object itself.
+  if (!error?.response) {
+    const message = typeof error?.message === 'string' ? error.message.trim() : '';
+    return message || fallback;
+  }
+
+  const message = getBackendErrorMessage(error);
+  // `getBackendErrorMessage` falls back to Axios's own generic text ("Request
+  // failed with status code 400"), which is never user-facing copy. When that
+  // is all we got, prefer the caller's message instead of leaking it.
+  return message && message.trim() && message !== error.message
+    ? message.trim()
+    : fallback;
+}
+
+// Terminal error whose `message` is already user-facing copy. The original
+// Axios metadata is preserved so callers can still branch on HTTP status —
+// e.g. `checkAuth` treats a 401 as an invalid session.
+type NormalizedError = Error & { normalized: true; response?: any };
+
+function toNormalizedError(error: any, detail: string): NormalizedError {
+  const normalized = new Error(detail) as NormalizedError;
+  normalized.normalized = true;
+  normalized.response = error?.response;
+  return normalized;
+}
 
 interface AuthState {
   // State
@@ -63,7 +115,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         message: error.message,
         requestUrl: error.config?.url,
       });
-      const detail = error.response?.data?.detail || 'Login failed. Please try again.';
+      const detail = resolveErrorMessage(
+        error,
+        'Invalid email or password. Please try again.'
+      );
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -99,10 +154,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error.message === 'No warehouses assigned to your account.') {
         throw error;
       }
-      const detail =
-        error.response?.data?.detail ||
-        error.message ||
-        'Invalid QR code. Please try again.';
+      const detail = resolveErrorMessage(error, 'Invalid QR code. Please try again.');
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -138,10 +190,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error.message === 'No warehouses assigned to your account.') {
         throw error;
       }
-      const detail =
-        error.response?.data?.detail ||
-        error.message ||
-        'Invalid QR code. Please try again.';
+      const detail = resolveErrorMessage(error, 'Invalid QR code. Please try again.');
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -158,10 +207,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         selectedWarehouse: defaultWarehouse,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || error.message || 'Failed to load warehouses';
+      const detail = resolveErrorMessage(error, 'Failed to load warehouses.');
       console.error('Failed to load warehouses:', error);
       set({ error: detail });
-      throw error; // Re-throw so login flow can handle it
+      // Re-throw carrying the normalised message so callers surface
+      // user-facing copy instead of Axios's raw error text.
+      throw toNormalizedError(error, detail);
     }
   },
 

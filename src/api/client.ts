@@ -156,6 +156,23 @@ export async function clearTokens(): Promise<void> {
   }
 }
 
+// ---------- Endpoints that authenticate the user ----------
+// A 401 from a login endpoint means "the credentials just supplied are wrong",
+// NOT "the session expired". Refreshing here would silently retry the login via
+// coreClient and mask the real error, so these reject immediately instead.
+const LOGIN_ENDPOINTS = [
+  '/identity/login',
+  '/identity/login/qr-code',
+  '/wms-workers/login/barcode',
+];
+
+// Endpoints that do not require an Authorization header.
+const PUBLIC_ENDPOINTS = [...LOGIN_ENDPOINTS, '/identity/refresh'];
+
+function isLoginRequest(url?: string): boolean {
+  return !!url && LOGIN_ENDPOINTS.some((endpoint) => url.includes(endpoint));
+}
+
 // ---------- Response Interceptor — Auto-refresh on 401 ----------
 let isRefreshing = false;
 let failedQueue: {
@@ -198,6 +215,12 @@ async function handle401(error: AxiosError) {
   // If the failing request IS the refresh endpoint itself, don't try to refresh again
   if (originalRequest.url?.includes('/identity/refresh')) {
     await clearTokens();
+    return Promise.reject(error);
+  }
+
+  // Login endpoints: a failed sign-in must never refresh tokens, clear tokens,
+  // or retry the request. Reject as-is so the UI can show the backend message.
+  if (isLoginRequest(originalRequest.url)) {
     return Promise.reject(error);
   }
 
@@ -272,8 +295,6 @@ coreClient.interceptors.response.use((res) => res, responseErrorHandler);
 identityClient.interceptors.response.use((res) => res, responseErrorHandler);
 
 // Request: attach JWT token to authenticated requests
-const PUBLIC_ENDPOINTS = ['/identity/login', '/identity/refresh', '/identity/login/qr-code', '/wms-workers/login/barcode'];
-
 async function authRequestInterceptor(
   config: InternalAxiosRequestConfig
 ): Promise<InternalAxiosRequestConfig> {
