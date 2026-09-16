@@ -20,12 +20,42 @@ import { getBackendErrorMessage } from '@/utils/errors';
 // failed login previously took the whole app down with no message shown.
 // ------------------------------------------------------------
 function resolveErrorMessage(error: any, fallback: string): string {
-  if (!error?.response) {
-    // No HTTP response — the request never reached the server (offline, timeout).
+  // Already normalised by us (see `loadWarehouses`) — the message is final,
+  // user-facing copy, so never re-derive it from the payload.
+  if (error?.normalized && typeof error?.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+
+  // Axios reports offline/DNS/timeout failures without an HTTP response.
+  if (error?.isAxiosError && !error?.response) {
     return 'Cannot reach the server. Check your connection and try again.';
   }
+
+  // No HTTP response, but a real message was set on the error object itself.
+  if (!error?.response) {
+    const message = typeof error?.message === 'string' ? error.message.trim() : '';
+    return message || fallback;
+  }
+
   const message = getBackendErrorMessage(error);
-  return typeof message === 'string' && message.trim() ? message : fallback;
+  // `getBackendErrorMessage` falls back to Axios's own generic text ("Request
+  // failed with status code 400"), which is never user-facing copy. When that
+  // is all we got, prefer the caller's message instead of leaking it.
+  return message && message.trim() && message !== error.message
+    ? message.trim()
+    : fallback;
+}
+
+// Terminal error whose `message` is already user-facing copy. The original
+// Axios metadata is preserved so callers can still branch on HTTP status —
+// e.g. `checkAuth` treats a 401 as an invalid session.
+type NormalizedError = Error & { normalized: true; response?: any };
+
+function toNormalizedError(error: any, detail: string): NormalizedError {
+  const normalized = new Error(detail) as NormalizedError;
+  normalized.normalized = true;
+  normalized.response = error?.response;
+  return normalized;
 }
 
 interface AuthState {
@@ -180,7 +210,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const detail = resolveErrorMessage(error, 'Failed to load warehouses.');
       console.error('Failed to load warehouses:', error);
       set({ error: detail });
-      throw error; // Re-throw so login flow can handle it
+      // Re-throw carrying the normalised message so callers surface
+      // user-facing copy instead of Axios's raw error text.
+      throw toNormalizedError(error, detail);
     }
   },
 
