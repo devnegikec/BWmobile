@@ -14,7 +14,6 @@ export default function InboundScreen() {
   if (flow.step === 'idle') {
     return (
       <StartSessionView
-        warehouseName={flow.selectedWarehouse?.name || ''}
         dockLocation={flow.dockLocation}
         onDockLocationChange={flow.setDockLocation}
         selectedAsn={flow.selectedAsn}

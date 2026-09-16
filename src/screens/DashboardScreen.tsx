@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
+import WarehouseSelector from '@/components/WarehouseSelector';
 
 export default function DashboardScreen({ navigation }: any) {
   const {
@@ -103,12 +104,7 @@ export default function DashboardScreen({ navigation }: any) {
       {/* Header — Warehouse + Logout */}
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
-          <Text style={styles.warehouseName}>
-            {selectedWarehouse?.name || 'Loading...'}
-          </Text>
-          {selectedWarehouse && (
-            <Text style={styles.warehouseCity}>{selectedWarehouse.city}</Text>
-          )}
+          <WarehouseSelector />
         </View>
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutBtnText}>Logout</Text>

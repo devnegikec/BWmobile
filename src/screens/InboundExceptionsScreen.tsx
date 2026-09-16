@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
+import WarehouseSelector from '@/components/WarehouseSelector';
 import * as inboundService from '@/api/inboundService';
 import type { InboundException } from '@/types';
 
@@ -88,7 +89,8 @@ export default function InboundExceptionsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>HOLD & QUARANTINE</Text>
-        <Text style={styles.subtitle}>{selectedWarehouse?.name || 'Select a warehouse'} · manager decision queue</Text>
+        <WarehouseSelector style={styles.selector} />
+        <Text style={styles.subtitle}>manager decision queue</Text>
       </View>
       {loading && !items.length ? <ActivityIndicator color="#1A73E8" style={styles.loader} /> : (
         <FlatList
@@ -147,7 +149,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F1923' },
   header: { paddingTop: 60, paddingHorizontal: 24, paddingBottom: 18, backgroundColor: '#1A2332' },
   title: { color: '#fff', fontSize: 21, fontWeight: '800' },
-  subtitle: { color: '#8899AA', marginTop: 4, fontSize: 13 },
+  selector: { marginTop: 10 },
+  subtitle: { color: '#8899AA', marginTop: 8, fontSize: 13 },
   loader: { marginTop: 40 }, list: { padding: 16, paddingBottom: 40 },
   empty: { paddingTop: 100, alignItems: 'center' }, emptyIcon: { fontSize: 38, color: '#4ADE80' }, emptyText: { color: '#B0C4D8', marginTop: 10 },
   card: { backgroundColor: '#1A2332', borderRadius: 12, borderWidth: 1, borderColor: '#2A3A4A', padding: 16, marginBottom: 12 },

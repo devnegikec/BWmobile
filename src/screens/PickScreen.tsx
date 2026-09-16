@@ -541,7 +541,7 @@ export default function PickScreen() {
     if (viewMode === 'list') {
         return (
             <View style={styles.container}>
-                <PutawayHeader title="Pick Lists" subtitle={`${lists.length} active · ${selectedWarehouse?.name || ''}`} />
+                <PutawayHeader title="Pick Lists" subtitle={`${lists.length} active · ${selectedWarehouse?.name || ''}`} showWarehouseSelector />
                 {error ? (
                     <View style={styles.errorBanner}>
                         <Text style={styles.errorText}>{error}</Text>

@@ -6,9 +6,16 @@ import { StyleSheet } from 'react-native';
 export const styles = StyleSheet.create({
   // Container + header (AssignView style)
   container: { flex: 1, backgroundColor: '#0F1923' },
+  headerWrap: {
+    backgroundColor: '#1A2332',
+  },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16,
+  },
+  headerSelector: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
   },
   backBtn: { padding: 6 },
   backIcon: { color: '#fff', fontSize: 28, lineHeight: 30 },

@@ -57,6 +57,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
+      console.warn('[auth] loginWithPassword failed:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        requestUrl: error.config?.url,
+      });
       const detail = error.response?.data?.detail || 'Login failed. Please try again.';
       set({ isLoading: false, error: detail });
       throw new Error(detail);
