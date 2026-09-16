@@ -5,6 +5,28 @@ import { create } from 'zustand';
 import type { User, Worker, Warehouse } from '@/types';
 import * as authService from '@/api/authService';
 import { getAccessToken, setOnTokensCleared } from '@/api/client';
+import { getBackendErrorMessage } from '@/utils/errors';
+
+// ------------------------------------------------------------
+// Normalise any backend/network failure into a plain string.
+//
+// The identity/core services return errors in several shapes:
+//   - { detail: "string" }               → FastAPI HTTPException
+//   - { detail: { message, error } }     → nested error object
+//   - { detail: [{ loc, msg, type }] }   → FastAPI validation array (e.g. a
+//                                          malformed email address)
+// Storing a non-string in `error` crashes React the moment it is rendered
+// inside <Text> ("Objects are not valid as a React child"), which is why a
+// failed login previously took the whole app down with no message shown.
+// ------------------------------------------------------------
+function resolveErrorMessage(error: any, fallback: string): string {
+  if (!error?.response) {
+    // No HTTP response — the request never reached the server (offline, timeout).
+    return 'Cannot reach the server. Check your connection and try again.';
+  }
+  const message = getBackendErrorMessage(error);
+  return typeof message === 'string' && message.trim() ? message : fallback;
+}
 
 interface AuthState {
   // State
@@ -63,7 +85,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         message: error.message,
         requestUrl: error.config?.url,
       });
-      const detail = error.response?.data?.detail || 'Login failed. Please try again.';
+      const detail = resolveErrorMessage(
+        error,
+        'Invalid email or password. Please try again.'
+      );
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -99,10 +124,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error.message === 'No warehouses assigned to your account.') {
         throw error;
       }
-      const detail =
-        error.response?.data?.detail ||
-        error.message ||
-        'Invalid QR code. Please try again.';
+      const detail = resolveErrorMessage(error, 'Invalid QR code. Please try again.');
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -138,10 +160,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error.message === 'No warehouses assigned to your account.') {
         throw error;
       }
-      const detail =
-        error.response?.data?.detail ||
-        error.message ||
-        'Invalid QR code. Please try again.';
+      const detail = resolveErrorMessage(error, 'Invalid QR code. Please try again.');
       set({ isLoading: false, error: detail });
       throw new Error(detail);
     }
@@ -158,7 +177,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         selectedWarehouse: defaultWarehouse,
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail || error.message || 'Failed to load warehouses';
+      const detail = resolveErrorMessage(error, 'Failed to load warehouses.');
       console.error('Failed to load warehouses:', error);
       set({ error: detail });
       throw error; // Re-throw so login flow can handle it

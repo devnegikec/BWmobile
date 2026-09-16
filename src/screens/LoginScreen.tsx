@@ -20,16 +20,25 @@ export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  // Controls whether the password is masked or shown in plain text, so the
+  // user can verify what they typed before submitting.
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both email and password.');
+      Alert.alert('Missing Details', 'Please enter both email and password.');
       return;
     }
     try {
       await loginWithPassword(email.trim(), password, rememberMe);
     } catch (err: any) {
-      Alert.alert('Login Failed', err.message);
+      // The store normalises errors to a string; guard here as well so a
+      // non-string value can never reach Alert/Text and crash the app.
+      const message =
+        typeof err?.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Your email or password may be incorrect. Please try again.';
+      Alert.alert('Login Failed', message);
     }
   };
 
@@ -71,17 +80,30 @@ export default function LoginScreen({ navigation }: any) {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              placeholderTextColor="#999"
-              secureTextEntry
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
-                clearError();
-              }}
-            />
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[styles.input, styles.inputWithAction]}
+                placeholder="Enter your password"
+                placeholderTextColor="#999"
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={password}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  clearError();
+                }}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((visible) => !visible)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+              >
+                <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Remember Me */}
@@ -95,8 +117,10 @@ export default function LoginScreen({ navigation }: any) {
             <Text style={styles.rememberText}>Remember me (30 days)</Text>
           </TouchableOpacity>
 
-          {/* Error */}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {/* Error — guarded so a non-string value can never crash the render */}
+          {typeof error === 'string' && error.trim() ? (
+            <Text style={styles.error}>{error}</Text>
+          ) : null}
 
           {/* Login Button */}
           <TouchableOpacity
@@ -193,6 +217,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#2A3A4A',
+  },
+  inputRow: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inputWithAction: {
+    // Leave room for the eye button so typed text never runs underneath it
+    paddingRight: 52,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 6,
+    top: 0,
+    bottom: 0,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eyeIcon: {
+    fontSize: 18,
   },
   rememberRow: {
     flexDirection: 'row',
