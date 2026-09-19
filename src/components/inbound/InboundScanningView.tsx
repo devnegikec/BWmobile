@@ -90,6 +90,16 @@ export default function InboundScanningView({
     setEvidence(null);
   };
 
+  // Only surface exception information when the ASN actually has one.
+  const exceptionCount =
+    (reconciliation?.excess_total_qty ?? 0) +
+    (reconciliation?.damaged_total_qty ?? 0) +
+    (reconciliation?.hold_total_qty ?? 0) +
+    (reconciliation?.rejected_total_qty ?? 0);
+  const hasExceptions =
+    !!reconciliation &&
+    (reconciliation.reconciliation_status === 'exception' || exceptionCount > 0);
+
   return (
     <View style={styles.container}>
       {/* Session info bar */}
@@ -132,40 +142,26 @@ export default function InboundScanningView({
         />
 
         <View style={styles.stageOverlay} pointerEvents="box-none">
-          {/* Top: live ASN reconciliation (informational only) */}
-          {session.asn_order_id && (
-            <View pointerEvents="none">
-              <View style={[
-                styles.reconciliationBar,
-                reconciliation?.ready_for_receipt_note && styles.reconciliationReady,
-                reconciliation?.reconciliation_status === 'exception' && styles.reconciliationException,
-              ]}>
-                {isReconciliationLoading && !reconciliation ? (
-                  <Text style={styles.reconciliationText}>Refreshing ASN reconciliation…</Text>
-                ) : reconciliation ? (
-                  <>
-                    <Text style={styles.reconciliationTitle}>
-                      {reconciliation.ready_for_receipt_note
-                        ? '✓ Reconciled — Ready for Receipt Note'
-                        : reconciliation.reconciliation_status === 'exception'
-                          ? '⚠ Exception requires review'
-                          : reconciliation.is_partial_receipt
-                            ? `Partial receipt · ${reconciliation.short_total_qty} units remaining`
-                            : 'Scanning in progress'}
-                    </Text>
-                    <Text style={styles.reconciliationText}>
-                      Expected {reconciliation.expected_total_qty} · Scanned {reconciliation.scanned_total_qty} · Accepted {reconciliation.accepted_total_qty}
-                    </Text>
-                    <Text style={styles.reconciliationText}>
-                      Short {reconciliation.short_total_qty} · Excess {reconciliation.excess_total_qty} · Damaged {reconciliation.damaged_total_qty} · Hold {reconciliation.hold_total_qty} · Rejected {reconciliation.rejected_total_qty}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.reconciliationText}>Live reconciliation is unavailable. Continue scanning and try again.</Text>
-                )}
+          {/* Top: scan counts, plus an exception alert only when one exists */}
+          <View style={styles.stageTop} pointerEvents="none">
+            {(qsealBoxCount > 0 || qsealItemCount > 0) && (
+              <View style={styles.qsealCountBar}>
+                <Text style={styles.qsealCountText}>
+                  📦 {qsealBoxCount} box{qsealBoxCount > 1 ? 'es' : ''}
+                  {' · '}
+                  📋 {qsealItemCount} item{qsealItemCount > 1 ? 's' : ''}
+                </Text>
               </View>
-            </View>
-          )}
+            )}
+            {hasExceptions && reconciliation && (
+              <View style={[styles.reconciliationBar, styles.reconciliationException]}>
+                <Text style={styles.reconciliationTitle}>⚠ Exception requires review</Text>
+                <Text style={styles.reconciliationText}>
+                  Short {reconciliation.short_total_qty} · Excess {reconciliation.excess_total_qty} · Damaged {reconciliation.damaged_total_qty} · Hold {reconciliation.hold_total_qty} · Rejected {reconciliation.rejected_total_qty}
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* Bottom: progress + last scan, stacked transparently over the preview */}
           <View style={styles.stageBottom}>
@@ -173,15 +169,6 @@ export default function InboundScanningView({
               <View style={styles.linkedUnitsLoading} pointerEvents="none">
                 <ActivityIndicator size="small" color="#1A73E8" />
                 <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
-              </View>
-            )}
-            {qsealBoxCount > 0 && (
-              <View style={styles.qsealCountBar} pointerEvents="none">
-                <Text style={styles.qsealCountText}>
-                  📦 {qsealBoxCount} box{qsealBoxCount > 1 ? 'es' : ''}
-                  {' · '}
-                  📋 {qsealItemCount} item{qsealItemCount > 1 ? 's' : ''}
-                </Text>
               </View>
             )}
             {lastScan && (
@@ -290,6 +277,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'space-between',
   },
+  /** Top stack: box/item counts and exception alert */
+  stageTop: {
+    paddingTop: 10,
+    gap: 10,
+  },
   /** Bottom stack: QSeal progress and last-scan feedback */
   stageBottom: {
     paddingBottom: 8,
@@ -354,14 +346,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
     marginHorizontal: 12,
-    marginTop: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
-  },
-  reconciliationReady: {
-    backgroundColor: 'rgba(23,61,43,0.55)',
-    borderColor: 'rgba(45,122,74,0.75)',
   },
   reconciliationException: {
     backgroundColor: 'rgba(74,53,18,0.55)',
@@ -402,8 +389,8 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 5,
   },
-  exceptionButton: { alignSelf: 'center', marginTop: 10, backgroundColor: '#B45309', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  exceptionButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  exceptionButton: { alignSelf: 'center', marginTop: 8, backgroundColor: '#B45309', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  exceptionButtonText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   scanActions: {
     padding: 16,
     gap: 12,
@@ -467,7 +454,6 @@ const styles = StyleSheet.create({
   qsealCountBar: {
     backgroundColor: 'rgba(0,0,0,0.45)',
     marginHorizontal: 12,
-    marginBottom: 6,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
