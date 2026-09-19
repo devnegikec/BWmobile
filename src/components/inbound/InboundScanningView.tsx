@@ -91,14 +91,23 @@ export default function InboundScanningView({
   };
 
   // Only surface exception information when the ASN actually has one.
+  // While scanning is still in progress every un-scanned unit counts as
+  // "short", so shortages only signal an exception once the receipt is being
+  // finalised — otherwise the warning would be permanently on during scanning.
+  const shortCount = reconciliation?.is_partial_receipt || reconciliation?.ready_for_receipt_note
+    ? reconciliation.short_total_qty
+    : 0;
   const exceptionCount =
     (reconciliation?.excess_total_qty ?? 0) +
     (reconciliation?.damaged_total_qty ?? 0) +
     (reconciliation?.hold_total_qty ?? 0) +
-    (reconciliation?.rejected_total_qty ?? 0);
+    (reconciliation?.rejected_total_qty ?? 0) +
+    shortCount;
   const hasExceptions =
     !!reconciliation &&
-    (reconciliation.reconciliation_status === 'exception' || exceptionCount > 0);
+    (reconciliation.reconciliation_status === 'exception' ||
+      reconciliation.unresolved_exception_count > 0 ||
+      exceptionCount > 0);
 
   return (
     <View style={styles.container}>

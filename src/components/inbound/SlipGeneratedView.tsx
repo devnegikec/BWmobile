@@ -32,7 +32,9 @@ export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSessi
         type: 'qseal-parent',
         productName: group.product_name || group.parent_qseal?.name || '-',
         sku: items[0]?.sku || '-',
-        batchNumber: group.parent_qseal?.batch || items[0]?.batch_number || '-',
+        // Mirror SummaryView: the parent row shows the first child's dispatch
+        // batch so the review and slip screens cannot disagree on batch identity.
+        batchNumber: items[0]?.batch_number || group.parent_qseal?.batch || '-',
         boxCount: 1,
         itemCount: items.length,
         rejectKey: parentKey,
@@ -143,8 +145,13 @@ export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSessi
     [rows, expandedParents]
   );
 
-  const childCount = rows.filter((row) => row.depth > 0).length;
-  const itemCount = childCount > 0 ? childCount : rows.length;
+  // Child rows are individual units, so the slip total must sum their
+  // quantities — counting rows would under-report multi-quantity lines.
+  const childRows = rows.filter((row) => row.depth > 0);
+  const itemCount =
+    childRows.length > 0
+      ? childRows.reduce((sum, row) => sum + row.itemCount, 0)
+      : rows.reduce((sum, row) => sum + row.itemCount, 0);
 
   return (
     <ScreenContainer
