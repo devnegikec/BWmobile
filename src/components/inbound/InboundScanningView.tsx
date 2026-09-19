@@ -200,12 +200,18 @@ export default function InboundScanningView({
 
       {/* Action buttons */}
       <View style={styles.scanActions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={onViewSummary}>
-          <Text style={styles.secondaryButtonText}>View Summary</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={onViewSummary}>
+            <Text style={styles.secondaryButtonText}>View Summary</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
-          <Text style={styles.endButtonText}>End Session</Text>
+          <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
+            <Text style={styles.endButtonText}>End Session</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
       </View>
 
@@ -399,10 +405,13 @@ const styles = StyleSheet.create({
   exceptionButton: { alignSelf: 'center', marginTop: 10, backgroundColor: '#B45309', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   exceptionButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   scanActions: {
-    flexDirection: 'row',
     padding: 16,
     gap: 12,
     backgroundColor: '#1A2332',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
   secondaryButton: {
     flex: 1,
@@ -427,6 +436,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  cancelButton: {
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '700',
   },
   linkedUnitsLoading: {
     flexDirection: 'row',
