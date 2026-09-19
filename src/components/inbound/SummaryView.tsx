@@ -18,6 +18,8 @@ interface Props {
   onResumeScanning: () => void;
   onEndSession: () => void;
   onRemoveParent: (parentId: string) => void;
+  /** Discard this session and return to the start screen */
+  onCancel: () => void;
 }
 
 export default function SummaryView({
@@ -27,6 +29,7 @@ export default function SummaryView({
   onResumeScanning,
   onEndSession,
   onRemoveParent,
+  onCancel,
 }: Props) {
   const itemRejections = useInboundStore((s) => s.itemRejections);
   const toggleItemRejection = useInboundStore((s) => s.toggleItemRejection);
@@ -183,6 +186,7 @@ export default function SummaryView({
       title="Session Summary"
       subtitle={`${sessionSummary.total_boxes} boxes · ${sessionSummary.total_quantity} qty`}
       scrollable
+      showHomeButton={false}
       contentContainerStyle={styles.summaryContent}
     >
       {session.asn_order_no && (
@@ -217,14 +221,21 @@ export default function SummaryView({
       />
 
       <View style={styles.summaryActions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={onResumeScanning}>
-          <Text style={styles.secondaryButtonText}>Resume Scanning</Text>
-        </TouchableOpacity>
+        <View style={styles.summaryActionsRow}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={onResumeScanning}>
+            <Text style={styles.secondaryButtonText}>Resume Scanning</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
-          <Text style={styles.endButtonText}>
-            End & Generate Slip{rejectedCount > 0 ? ` (${rejectedCount} rejected)` : ''}
-          </Text>
+          <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
+            <Text style={styles.endButtonText}>
+              End & Generate Slip{rejectedCount > 0 ? ` (${rejectedCount} rejected)` : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Discard the whole session without generating a slip */}
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+          <Text style={styles.cancelButtonText}>Cancel Session</Text>
         </TouchableOpacity>
       </View>
     </ScreenContainer>

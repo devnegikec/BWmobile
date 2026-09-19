@@ -14,6 +14,11 @@ interface SummaryTableProps {
   onReject: (row: TableRow) => void;
   onUnreject: (row: TableRow) => void;
   onRemoveParent: (row: TableRow) => void;
+  /**
+   * Hide the Action column (Reject / Remove) and render the table as a
+   * read-only view. Used by SlipGeneratedView to display a generated slip.
+   */
+  readOnly?: boolean;
 }
 
 export default function SummaryTable({
@@ -24,6 +29,7 @@ export default function SummaryTable({
   onReject,
   onUnreject,
   onRemoveParent,
+  readOnly = false,
 }: SummaryTableProps) {
   return (
     <View style={styles.unifiedTable}>
@@ -31,8 +37,12 @@ export default function SummaryTable({
       <View style={styles.utColHeaders}>
         <Text style={[styles.utColHeader, styles.utColProduct]}>Product / SKU</Text>
         <Text style={[styles.utColHeader, styles.utColBatch]}>Batch</Text>
-        <Text style={[styles.utColHeader, styles.utColBoxes]}>Boxes / Items</Text>
-        <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>
+        <Text
+          style={[styles.utColHeader, readOnly ? styles.utColBoxesReadOnly : styles.utColBoxes]}
+        >
+          Boxes / Items
+        </Text>
+        {!readOnly && <Text style={[styles.utColHeader, styles.utColAction]}>Action</Text>}
       </View>
 
       {rows.map((row) => {
@@ -88,51 +98,55 @@ export default function SummaryTable({
             </View>
 
             {/* Col 3: Boxes/Items (parent) or Qty (child) */}
-            <View style={[styles.utCell, styles.utColBoxes]}>
+            <View
+              style={[styles.utCell, readOnly ? styles.utColBoxesReadOnly : styles.utColBoxes]}
+            >
               <Text style={[styles.utBoxItems, isRejectedRow && styles.utTextRejected]}>
                 {isChild ? row.itemCount : `${row.boxCount}/${row.itemCount}`}
               </Text>
             </View>
 
-            {/* Col 4: Action */}
-            <View style={[styles.utCell, styles.utColAction]}>
-              {row.type === 'qseal-parent' && (
+            {/* Col 4: Action (hidden in read-only mode) */}
+            {!readOnly && (
+              <View style={[styles.utCell, styles.utColAction]}>
+                {row.type === 'qseal-parent' && (
+                  <TouchableOpacity
+                    style={styles.utRemoveBtn}
+                    onPress={() => onRemoveParent(row)}
+                  >
+                    <Text style={styles.utRemoveBtnText}>Remove</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
-                  style={styles.utRemoveBtn}
-                  onPress={() => onRemoveParent(row)}
+                  style={[styles.utRejectBtn, isRejectedRow && styles.utRejectBtnActive]}
+                  onPress={() => {
+                    if (isRejectedRow) {
+                      onUnreject(row);
+                    } else {
+                      const label = row.type === 'qseal-parent'
+                        ? `${row.productName} (+${row.itemCount} items)`
+                        : row.productName;
+                      Alert.alert(
+                        'Confirm Rejection',
+                        `Reject "${label}"?\nThis will move it to the reject list.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Reject',
+                            style: 'destructive',
+                            onPress: () => onReject(row),
+                          },
+                        ]
+                      );
+                    }
+                  }}
                 >
-                  <Text style={styles.utRemoveBtnText}>Remove</Text>
+                  <Text style={[styles.utRejectBtnText, isRejectedRow && styles.utRejectBtnTextActive]}>
+                    {isRejectedRow ? 'Rejected' : 'Reject'}
+                  </Text>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={[styles.utRejectBtn, isRejectedRow && styles.utRejectBtnActive]}
-                onPress={() => {
-                  if (isRejectedRow) {
-                    onUnreject(row);
-                  } else {
-                    const label = row.type === 'qseal-parent'
-                      ? `${row.productName} (+${row.itemCount} items)`
-                      : row.productName;
-                    Alert.alert(
-                      'Confirm Rejection',
-                      `Reject "${label}"?\nThis will move it to the reject list.`,
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Reject',
-                          style: 'destructive',
-                          onPress: () => onReject(row),
-                        },
-                      ]
-                    );
-                  }
-                }}
-              >
-                <Text style={[styles.utRejectBtnText, isRejectedRow && styles.utRejectBtnTextActive]}>
-                  {isRejectedRow ? 'Rejected' : 'Reject'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </TouchableOpacity>
         );
       })}

@@ -61,6 +61,7 @@ export default function InboundScreen() {
         onResumeScanning={() => flow.setStep('scanning')}
         onEndSession={flow.handleEndSession}
         onRemoveParent={flow.removeParent}
+        onCancel={flow.handleCancelSession}
       />
     );
   }
