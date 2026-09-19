@@ -54,6 +54,8 @@ export const styles = StyleSheet.create({
   utColProduct: { flex: 5, minWidth: 0 },
   utColBatch: { flex: 2, minWidth: 0 },
   utColBoxes: { width: 55, alignItems: 'center' as const },
+  /** Wider boxes column used when the Action column is hidden (read-only table) */
+  utColBoxesReadOnly: { flex: 2, alignItems: 'center' as const },
   utColAction: {
     width: 128,
     flexDirection: 'row' as const,
@@ -177,9 +179,25 @@ export const styles = StyleSheet.create({
     marginTop: 2,
   },
   summaryActions: {
-    flexDirection: 'row',
     padding: 24,
     gap: 12,
+  },
+  summaryActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '700',
   },
   secondaryButton: {
     flex: 1,

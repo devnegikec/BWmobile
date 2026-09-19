@@ -1,10 +1,11 @@
 // ============================================================
 // SlipGeneratedView — Success state after slip generation
 // ============================================================
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import ScreenContainer from '@/components/ScreenContainer';
-import LinkedUnitsTable from '@/components/inbound/LinkedUnitsTable';
+import SummaryTable from './SummaryTable';
+import type { TableRow } from './summaryTypes';
 import type { ReceivingSlip, QSealParentWithUnits } from '@/types';
 
 interface Props {
@@ -15,17 +16,149 @@ interface Props {
 
 export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSession }: Props) {
   // The API returns either the newer grouped format (`groups`) or the
-  // legacy flat format (`items`). Normalize both into a single list so
-  // the success screen shows item rows regardless of response shape.
-  const slipItems = slip.groups?.length
-    ? slip.groups.flatMap((group) => group.items)
-    : (slip.items ?? []);
+  // legacy flat format (`items`). Normalize both into the same table rows
+  // that the inbound SummaryView uses, so the success screen reuses the
+  // exact same table component.
+  const rows = useMemo<TableRow[]>(() => {
+    const next: TableRow[] = [];
+
+    // 1. Grouped format: one parent QSeal box + its linked child units
+    (slip.groups ?? []).forEach((group, groupIndex) => {
+      const items = group.items ?? [];
+      const parentKey = `slip-parent||${group.parent_qseal?.id ?? groupIndex}`;
+
+      next.push({
+        key: parentKey,
+        type: 'qseal-parent',
+        productName: group.product_name || group.parent_qseal?.name || '-',
+        sku: items[0]?.sku || '-',
+        // Mirror SummaryView: the parent row shows the first child's dispatch
+        // batch so the review and slip screens cannot disagree on batch identity.
+        batchNumber: items[0]?.batch_number || group.parent_qseal?.batch || '-',
+        boxCount: 1,
+        itemCount: items.length,
+        rejectKey: parentKey,
+        depth: 0,
+        isExpandable: items.length > 0,
+      });
+
+      items.forEach((item) => {
+        const childKey = `slip-child||${item.id}`;
+        next.push({
+          key: childKey,
+          type: 'qseal-child',
+          productName: item.serial_number,
+          sku: item.sku || '-',
+          batchNumber: item.batch_number || '-',
+          boxCount: item.box_count || 1,
+          itemCount: item.quantity || 1,
+          rejectKey: childKey,
+          parentKey,
+          depth: 1,
+          isExpandable: false,
+        });
+      });
+    });
+
+    // 2. Legacy flat format
+    if (next.length === 0) {
+      (slip.items ?? []).forEach((item, itemIndex) => {
+        const key = `slip-item||${item.id ?? itemIndex}`;
+        next.push({
+          key,
+          type: 'scan-batch',
+          productName: item.sku,
+          sku: item.sku,
+          batchNumber: item.batch_number || '-',
+          boxCount: item.box_count || 1,
+          itemCount: item.quantity || 1,
+          rejectKey: key,
+          depth: 0,
+          isExpandable: false,
+        });
+      });
+    }
+
+    // 3. Fallback: slip payload carried no lines → show the scanned QSeal units
+    if (next.length === 0) {
+      linkedUnitsParents.forEach((parent) => {
+        const units = parent.linked_units || [];
+        const parentKey = `slip-parent||${parent.id}`;
+
+        next.push({
+          key: parentKey,
+          type: 'qseal-parent',
+          productName: units[0]?.product_name || parent.name,
+          sku: units[0]?.product_sku || '-',
+          batchNumber: units[0]?.dispatch_batch || '-',
+          boxCount: 1,
+          itemCount: units.length,
+          rejectKey: parentKey,
+          depth: 0,
+          isExpandable: units.length > 0,
+        });
+
+        units.forEach((unit) => {
+          const childKey = `slip-child||${unit.id}`;
+          next.push({
+            key: childKey,
+            type: 'qseal-child',
+            productName: unit.serial_number,
+            sku: unit.product_sku || '-',
+            batchNumber: unit.serial_number || unit.dispatch_batch || '-',
+            boxCount: 1,
+            itemCount: 1,
+            rejectKey: childKey,
+            parentKey,
+            depth: 1,
+            isExpandable: false,
+          });
+        });
+      });
+    }
+
+    return next;
+  }, [slip, linkedUnitsParents]);
+
+  // Parents holding child units start expanded so the whole slip is visible.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(
+    () => new Set(rows.filter((row) => row.isExpandable).map((row) => row.key))
+  );
+
+  const toggleExpand = (key: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const visibleRows = useMemo(
+    () =>
+      rows.filter(
+        (row) => row.depth === 0 || (row.parentKey && expandedParents.has(row.parentKey))
+      ),
+    [rows, expandedParents]
+  );
+
+  // Child rows are individual units, so the slip total must sum their
+  // quantities — counting rows would under-report multi-quantity lines.
+  const childRows = rows.filter((row) => row.depth > 0);
+  const itemCount =
+    childRows.length > 0
+      ? childRows.reduce((sum, row) => sum + row.itemCount, 0)
+      : rows.reduce((sum, row) => sum + row.itemCount, 0);
 
   return (
     <ScreenContainer
       title="Receiving Slip"
       subtitle="Slip generated successfully"
       scrollable
+      showHomeButton={false}
       contentContainerStyle={styles.resultContent}
     >
       <View style={styles.successBanner}>
@@ -40,29 +173,23 @@ export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSessi
         )}
       </View>
 
-      {/* Slip Items */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionCardTitle}>Items ({slipItems.length})</Text>
-        {slipItems.map((item) => (
-          <View key={item.id} style={styles.itemRow}>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemSku}>{item.sku}</Text>
-              <Text style={styles.itemBatch}>{item.batch_number}</Text>
-            </View>
-            <View style={styles.itemQty}>
-              <Text style={styles.itemQtyText}>{item.quantity} × {item.box_count} boxes</Text>
-            </View>
-          </View>
-        ))}
-      </View>
+      {/* Primary action — sits directly under the confirmation box */}
+      <TouchableOpacity style={styles.newSessionButton} onPress={onNewSession}>
+        <Text style={styles.newSessionText}>Start New Session</Text>
+      </TouchableOpacity>
 
-      {/* QSeal Linked Units */}
-      {linkedUnitsParents?.length > 0 && (
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>🔗 Linked Units</Text>
-          <LinkedUnitsTable parents={linkedUnitsParents} />
-        </View>
-      )}
+      {/* Slip contents rendered with the inbound summary table */}
+      <Text style={styles.tableSectionTitle}>Slip Items ({itemCount})</Text>
+      <SummaryTable
+        rows={visibleRows}
+        expandedParents={expandedParents}
+        isRejected={() => false}
+        onToggleExpand={toggleExpand}
+        onReject={() => {}}
+        onUnreject={() => {}}
+        onRemoveParent={() => {}}
+        readOnly
+      />
 
       {/* Info note */}
       <View style={styles.infoNote}>
@@ -72,11 +199,6 @@ export default function SlipGeneratedView({ slip, linkedUnitsParents, onNewSessi
           to map items to bin locations.
         </Text>
       </View>
-
-      {/* New Session Button */}
-      <TouchableOpacity style={styles.newSessionButton} onPress={onNewSession}>
-        <Text style={styles.newSessionText}>Start New Session</Text>
-      </TouchableOpacity>
     </ScreenContainer>
   );
 }
@@ -126,44 +248,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 10,
   },
-  sectionCard: {
-    backgroundColor: '#1A2332',
-    borderRadius: 12,
-    padding: 20,
-    marginHorizontal: 24,
-    marginTop: 20,
-  },
-  sectionCardTitle: {
+  tableSectionTitle: {
     color: '#8899AA',
     fontSize: 13,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 1,
-    marginBottom: 14,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2A3A4A',
-  },
-  itemInfo: {},
-  itemSku: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  itemBatch: {
-    color: '#8899AA',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  itemQty: {},
-  itemQtyText: {
-    color: '#B0C4D8',
-    fontSize: 14,
+    marginHorizontal: 24,
+    marginTop: 24,
   },
   infoNote: {
     backgroundColor: 'rgba(26,115,232,0.1)',
@@ -184,16 +276,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   newSessionButton: {
-    borderWidth: 1,
-    borderColor: '#2A3A4A',
+    backgroundColor: '#1A73E8',
     borderRadius: 10,
-    paddingVertical: 14,
+    paddingVertical: 15,
     alignItems: 'center',
     marginHorizontal: 24,
     marginTop: 20,
   },
   newSessionText: {
-    color: '#8899AA',
+    color: '#fff',
     fontSize: 16,
+    fontWeight: '700',
   },
 });

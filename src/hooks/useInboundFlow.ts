@@ -58,6 +58,11 @@ export function useInboundFlow() {
   // duplicate check must read/write synchronously — rapid scans can arrive
   // before a React state update would propagate.
   const scannedQSealSerials = useRef<Set<string>>(new Set());
+  // Bumped on every local reset (end / cancel / new session). Background scan
+  // batches capture the value and bail out once it changes, so a scan request
+  // that was already in flight cannot be written into a session that has since
+  // been cancelled while local state was being reset.
+  const sessionGeneration = useRef(0);
 
   // Sync step with store state
   useEffect(() => {
@@ -107,15 +112,27 @@ export function useInboundFlow() {
     void refreshReconciliation();
   }, [currentSession?.id, currentSession?.asn_order_id, refreshReconciliation]);
 
+  // Reset every piece of local state back to the idle start screen. Shared by
+  // end-session, cancel-session and start-new-session so the three paths can
+  // never drift apart.
+  const resetToIdle = useCallback(() => {
+    // Invalidate any in-flight scan work for the session being discarded.
+    sessionGeneration.current += 1;
+    clearSession();
+    clearLinkedUnits();
+    setDockLocation('');
+    setShowAsnPicker(false);
+    setReconciliation(null);
+    setIsProcessingQSeal(false);
+    scannedQSealSerials.current = new Set();
+    setStep('idle');
+  }, [clearSession, clearLinkedUnits]);
+
   // ============ HANDLERS ============
 
   const handleStartSession = async () => {
     if (!selectedWarehouse) {
       Alert.alert('Error', 'Please select a warehouse first.');
-      return;
-    }
-    if (!dockLocation.trim()) {
-      Alert.alert('Error', 'Please enter a dock location.');
       return;
     }
 
@@ -170,10 +187,13 @@ export function useInboundFlow() {
   };
 
   // Background: record individual item scans concurrently
-  const recordScansInBackground = async (units: any[]) => {
+  const recordScansInBackground = async (units: any[], generation: number) => {
     const CONCURRENCY = 5;
     /* eslint-disable no-await-in-loop -- intentional batched concurrency (limit 5 in flight) */
     for (let i = 0; i < units.length; i += CONCURRENCY) {
+      // The session was ended/cancelled while a previous batch was in flight.
+      // Stop instead of writing more scans against the dead session.
+      if (generation !== sessionGeneration.current) return;
       const batch = units.slice(i, i + CONCURRENCY);
       await Promise.allSettled(
         batch.map(async (unit) => {
@@ -182,6 +202,7 @@ export function useInboundFlow() {
           } catch {}
         })
       );
+      if (generation !== sessionGeneration.current) return;
       await refreshReconciliation();
     }
     /* eslint-enable no-await-in-loop */
@@ -203,6 +224,9 @@ export function useInboundFlow() {
     }
     scannedQSealSerials.current.add(serial);
 
+    // Snapshot the session this scan belongs to. If the operator cancels while
+    // the QSeal is being resolved, every remaining step is discarded.
+    const generation = sessionGeneration.current;
     setIsProcessingQSeal(true);
     try {
       // Step 1: Resolve serial → get parent UUID
@@ -216,6 +240,13 @@ export function useInboundFlow() {
       // Step 2: Fetch linked units
       const parentWithUnits = await qsealService.getLinkedUnits(node.node_id);
 
+      // Session cancelled/ended mid-flight — drop this QSeal and its units.
+      if (generation !== sessionGeneration.current) {
+        console.log('[Inbound] QSeal discarded, session was reset:', serial);
+        setIsProcessingQSeal(false);
+        return;
+      }
+
       // Update store & UI immediately — don't wait for Step 3
       useInboundStore.setState((s) => ({
         linkedUnitsParents: [...s.linkedUnitsParents, parentWithUnits],
@@ -226,7 +257,7 @@ export function useInboundFlow() {
 
       // Step 3: Record individual scans in the BACKGROUND
       if (unitCount > 0) {
-        recordScansInBackground(parentWithUnits.linked_units!);
+        recordScansInBackground(parentWithUnits.linked_units!, generation);
       }
     } catch (err: any) {
       // Release the claim so this serial can be retried after the failure.
@@ -249,8 +280,12 @@ export function useInboundFlow() {
     } else {
       // ---- Regular item QR: record scan directly ----
       console.log('[Inbound] recordScan (regular):', { qr_data: data.substring(0, 80) });
+      const generation = sessionGeneration.current;
       try {
         const scan = await recordScan(data);
+        // Session was cancelled while this scan was in flight — stay quiet on
+        // the now-abandoned idle screen.
+        if (generation !== sessionGeneration.current) return;
         await refreshReconciliation();
         // Surface SKUs that are not on this ASN but were accepted into HOLD.
         // Use the scan returned by THIS call (not the shared lastScan) so a
@@ -384,13 +419,7 @@ export function useInboundFlow() {
   };
 
   const handleNewSession = () => {
-    clearSession();
-    clearLinkedUnits();
-    setDockLocation('');
-    setShowAsnPicker(false);
-    setReconciliation(null);
-    scannedQSealSerials.current = new Set();
-    setStep('idle');
+    resetToIdle();
   };
 
   const handleCancelSession = () => {
@@ -402,14 +431,31 @@ export function useInboundFlow() {
         {
           text: 'Cancel Session',
           style: 'destructive',
-          onPress: () => {
-            clearSession();
-            clearLinkedUnits();
-            setDockLocation('');
-            setShowAsnPicker(false);
-            setReconciliation(null);
-            scannedQSealSerials.current = new Set();
-            setStep('idle');
+          onPress: async () => {
+            // Close the session on the SERVER first. Resetting local state
+            // without this leaves the session OPEN on the backend, which then
+            // rejects the next "Start Session" with an existing-open-session
+            // conflict.
+            const sessionId = useInboundStore.getState().currentSession?.id;
+            if (sessionId) {
+              try {
+                await cancelInboundSession(sessionId);
+              } catch (err: any) {
+                const status = err?.response?.status;
+                // 404/409 mean it is already gone or closed on the server, so
+                // there is nothing left to cancel — safe to reset locally.
+                if (status !== 404 && status !== 409) {
+                  Alert.alert(
+                    'Cancel Failed',
+                    err?.response?.data?.message ||
+                      err?.message ||
+                      'Could not cancel the session on the server. Please try again.'
+                  );
+                  return; // Keep local state so the user can retry.
+                }
+              }
+            }
+            resetToIdle();
           },
         },
       ]

@@ -8,7 +8,7 @@ export interface InboundSession {
   session_type: 'inbound';
   worker_id: string;
   warehouse_id: string;
-  dock_location: string;
+  dock_location?: string | null;
   status: 'OPEN' | 'CLOSED';
   total_boxes_scanned: number;
   started_at: string;
@@ -21,7 +21,8 @@ export interface InboundSession {
 
 export interface StartSessionRequest {
   warehouse_id: string;
-  dock_location: string;
+  /** Optional — a blind receipt does not require a dock assignment */
+  dock_location?: string;
   asn_order_id?: string;
 }
 

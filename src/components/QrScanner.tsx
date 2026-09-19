@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import DataWedgeScanner from './DataWedgeScanner';
 import PermissionDenied from './PermissionDenied';
@@ -38,6 +39,13 @@ export default function QrScanner({ onScan, onClose, title, subtitle, showHardwa
   const [useHardwareScanner, setUseHardwareScanner] = useState(false);
   const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+
+  // Android only exposes ONE camera session to the app. Screens in the bottom
+  // tab navigator stay mounted after you visit them, so more than one QrScanner
+  // can exist at a time — whichever instance grabbed the camera first keeps it
+  // and the visible screen renders an empty/black preview. Gating on focus
+  // releases the camera from hidden screens and hands it to the active one.
+  const isFocused = useIsFocused();
 
   // Clean up timeout on unmount
   useEffect(() => {
@@ -127,26 +135,32 @@ export default function QrScanner({ onScan, onClose, title, subtitle, showHardwa
   // ── Camera-based scanning ──
   return (
     <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing="back"
-        barcodeScannerSettings={{
-          barcodeTypes: ['qr'],
-        }}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-      />
-      <View style={styles.overlay} pointerEvents="box-none">
-        {onClose && (
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>✕</Text>
-          </TouchableOpacity>
-        )}
+      {/* `collapsable={false}` is required on Android: the layout optimiser may
+          otherwise flatten this wrapper away, which leaves the SurfaceView
+          backed camera preview unmeasured and invisible. */}
+      <View style={styles.cameraWrap} collapsable={false}>
+        <CameraView
+          style={styles.camera}
+          active={isFocused}
+          facing="back"
+          barcodeScannerSettings={{
+            barcodeTypes: ['qr'],
+          }}
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        />
+      </View>
+      {/* The camera preview is intentionally left completely clear — no scrim
+          and no mask — so the operator can always see exactly what the camera
+          sees. The corner brackets frame the target and the hints below use a
+          text shadow to stay readable on any background. */}
+      <View style={styles.cameraOverlay} pointerEvents="box-none">
         <View style={styles.scanBox}>
           <View style={[styles.corner, styles.topLeft]} />
           <View style={[styles.corner, styles.topRight]} />
           <View style={[styles.corner, styles.bottomLeft]} />
           <View style={[styles.corner, styles.bottomRight]} />
         </View>
+
         <Text style={styles.title}>{title || 'Scan QR Code'}</Text>
         <Text style={styles.subtitle}>
           {subtitle || 'Align the QR code within the frame'}
@@ -162,6 +176,12 @@ export default function QrScanner({ onScan, onClose, title, subtitle, showHardwa
             onPress={switchToHardware}
           >
             <Text style={styles.switchButtonText}>Use Hardware Scanner</Text>
+          </TouchableOpacity>
+        )}
+
+        {onClose && (
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
         )}
       </View>

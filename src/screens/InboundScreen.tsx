@@ -23,8 +23,16 @@ export default function InboundScreen() {
         showAsnPicker={flow.showAsnPicker}
         onOpenAsnPicker={flow.openAsnPicker}
         onCloseAsnPicker={() => flow.setShowAsnPicker(false)}
-        onSelectAsn={flow.selectAsn}
-        onClearAsn={() => flow.selectAsn(null)}
+        onSelectAsn={(asn) => {
+          // Selecting an ASN should immediately dismiss the picker so the
+          // form (with the ASN now filled in) is visible again.
+          flow.selectAsn(asn);
+          flow.setShowAsnPicker(false);
+        }}
+        onClearAsn={() => {
+          flow.selectAsn(null);
+          flow.setShowAsnPicker(false);
+        }}
         onStartSession={flow.handleStartSession}
       />
     );
@@ -61,6 +69,7 @@ export default function InboundScreen() {
         onResumeScanning={() => flow.setStep('scanning')}
         onEndSession={flow.handleEndSession}
         onRemoveParent={flow.removeParent}
+        onCancel={flow.handleCancelSession}
       />
     );
   }

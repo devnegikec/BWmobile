@@ -90,6 +90,25 @@ export default function InboundScanningView({
     setEvidence(null);
   };
 
+  // Only surface exception information when the ASN actually has one.
+  // While scanning is still in progress every un-scanned unit counts as
+  // "short", so shortages only signal an exception once the receipt is being
+  // finalised — otherwise the warning would be permanently on during scanning.
+  const shortCount = reconciliation?.is_partial_receipt || reconciliation?.ready_for_receipt_note
+    ? reconciliation.short_total_qty
+    : 0;
+  const exceptionCount =
+    (reconciliation?.excess_total_qty ?? 0) +
+    (reconciliation?.damaged_total_qty ?? 0) +
+    (reconciliation?.hold_total_qty ?? 0) +
+    (reconciliation?.rejected_total_qty ?? 0) +
+    shortCount;
+  const hasExceptions =
+    !!reconciliation &&
+    (reconciliation.reconciliation_status === 'exception' ||
+      reconciliation.unresolved_exception_count > 0 ||
+      exceptionCount > 0);
+
   return (
     <View style={styles.container}>
       {/* Session info bar */}
@@ -103,7 +122,9 @@ export default function InboundScanningView({
         </TouchableOpacity>
         <View style={styles.sessionInfo}>
           <Text style={styles.sessionLabel}>Session Active</Text>
-          <Text style={styles.sessionDock}>{session.dock_location}</Text>
+          {session.dock_location ? (
+            <Text style={styles.sessionDock}>{session.dock_location}</Text>
+          ) : null}
           {session.asn_order_no && (
             <Text style={styles.sessionAsn}>📋 {session.asn_order_no}</Text>
           )}
@@ -117,82 +138,76 @@ export default function InboundScanningView({
         </View>
       </View>
 
-      {session.asn_order_id && (
-        <View style={[
-          styles.reconciliationBar,
-          reconciliation?.ready_for_receipt_note && styles.reconciliationReady,
-          reconciliation?.reconciliation_status === 'exception' && styles.reconciliationException,
-        ]}>
-          {isReconciliationLoading && !reconciliation ? (
-            <Text style={styles.reconciliationText}>Refreshing ASN reconciliation…</Text>
-          ) : reconciliation ? (
-            <>
-              <Text style={styles.reconciliationTitle}>
-                {reconciliation.ready_for_receipt_note
-                  ? '✓ Reconciled — Ready for Receipt Note'
-                  : reconciliation.reconciliation_status === 'exception'
-                    ? '⚠ Exception requires review'
-                    : reconciliation.is_partial_receipt
-                      ? `Partial receipt · ${reconciliation.short_total_qty} units remaining`
-                      : 'Scanning in progress'}
-              </Text>
-              <Text style={styles.reconciliationText}>
-                Expected {reconciliation.expected_total_qty} · Scanned {reconciliation.scanned_total_qty} · Accepted {reconciliation.accepted_total_qty}
-              </Text>
-              <Text style={styles.reconciliationText}>
-                Short {reconciliation.short_total_qty} · Excess {reconciliation.excess_total_qty} · Damaged {reconciliation.damaged_total_qty} · Hold {reconciliation.hold_total_qty} · Rejected {reconciliation.rejected_total_qty}
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.reconciliationText}>Live reconciliation is unavailable. Continue scanning and try again.</Text>
-          )}
-        </View>
-      )}
+      {/* ---- Camera stage ----
+          Everything between the session header and the action buttons is one
+          full-bleed camera preview. The status text is drawn as a transparent
+          overlay on top of it so the operator can always see what the camera
+          is pointing at. */}
+      <View style={styles.cameraStage}>
+        <QrScanner
+          onScan={onScan}
+          title="Scan Item QR Code"
+          subtitle={session.dock_location ? `Dock: ${session.dock_location}` : undefined}
+        />
 
-      {/* QR Scanner */}
-      <QrScanner
-        onScan={onScan}
-        title="Scan Item QR Code"
-        subtitle={`Dock: ${session.dock_location}`}
-      />
+        <View style={styles.stageOverlay} pointerEvents="box-none">
+          {/* Top: scan counts, plus an exception alert only when one exists */}
+          <View style={styles.stageTop} pointerEvents="none">
+            {(qsealBoxCount > 0 || qsealItemCount > 0) && (
+              <View style={styles.qsealCountBar}>
+                <Text style={styles.qsealCountText}>
+                  📦 {qsealBoxCount} box{qsealBoxCount > 1 ? 'es' : ''}
+                  {' · '}
+                  📋 {qsealItemCount} item{qsealItemCount > 1 ? 's' : ''}
+                </Text>
+              </View>
+            )}
+            {hasExceptions && reconciliation && (
+              <View style={[styles.reconciliationBar, styles.reconciliationException]}>
+                <Text style={styles.reconciliationTitle}>⚠ Exception requires review</Text>
+                <Text style={styles.reconciliationText}>
+                  Short {reconciliation.short_total_qty} · Excess {reconciliation.excess_total_qty} · Damaged {reconciliation.damaged_total_qty} · Hold {reconciliation.hold_total_qty} · Rejected {reconciliation.rejected_total_qty}
+                </Text>
+              </View>
+            )}
+          </View>
 
-      {/* Last scan feedback */}
-      {lastScan && (
-        <View style={styles.lastScanToast}>
-          <Text style={styles.lastScanText}>
-            ✅ {lastScan.sku} · Qty: {lastScan.raw_quantity} · {lastScan.batch_number || 'No batch'}
-          </Text>
-          <TouchableOpacity style={styles.exceptionButton} onPress={() => setShowException(true)}>
-            <Text style={styles.exceptionButtonText}>Classify exception</Text>
-          </TouchableOpacity>
+          {/* Bottom: progress + last scan, stacked transparently over the preview */}
+          <View style={styles.stageBottom}>
+            {isProcessingQSeal && (
+              <View style={styles.linkedUnitsLoading} pointerEvents="none">
+                <ActivityIndicator size="small" color="#1A73E8" />
+                <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
+              </View>
+            )}
+            {lastScan && (
+              <View style={styles.lastScanToast}>
+                <Text style={styles.lastScanText}>
+                  ✅ {lastScan.sku} · Qty: {lastScan.raw_quantity} · {lastScan.batch_number || 'No batch'}
+                </Text>
+                <TouchableOpacity style={styles.exceptionButton} onPress={() => setShowException(true)}>
+                  <Text style={styles.exceptionButtonText}>Classify exception</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </View>
-      )}
-
-      {/* QSeal count bar (compact) */}
-      {isProcessingQSeal && (
-        <View style={styles.linkedUnitsLoading}>
-          <ActivityIndicator size="small" color="#1A73E8" />
-          <Text style={styles.linkedUnitsLoadingText}>Fetching linked units...</Text>
-        </View>
-      )}
-      {qsealBoxCount > 0 && (
-        <View style={styles.qsealCountBar}>
-          <Text style={styles.qsealCountText}>
-            📦 {qsealBoxCount} box{qsealBoxCount > 1 ? 'es' : ''}
-            {' · '}
-            📋 {qsealItemCount} item{qsealItemCount > 1 ? 's' : ''}
-          </Text>
-        </View>
-      )}
+      </View>
 
       {/* Action buttons */}
       <View style={styles.scanActions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={onViewSummary}>
-          <Text style={styles.secondaryButtonText}>View Summary</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={onViewSummary}>
+            <Text style={styles.secondaryButtonText}>View Summary</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
-          <Text style={styles.endButtonText}>End Session</Text>
+          <TouchableOpacity style={styles.endButton} onPress={onEndSession}>
+            <Text style={styles.endButtonText}>End Session</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
       </View>
 
@@ -253,6 +268,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F1923',
   },
+  /** Full-bleed camera region between the session header and the action buttons */
+  cameraStage: {
+    flex: 1,
+    position: 'relative',
+    backgroundColor: '#000',
+  },
+  /**
+   * Transparent layer carrying the status text over the camera preview. Kept
+   * `box-none` so taps fall through to anything underneath.
+   */
+  stageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
+  /** Top stack: box/item counts and exception alert */
+  stageTop: {
+    paddingTop: 10,
+    gap: 10,
+  },
+  /** Bottom stack: QSeal progress and last-scan feedback */
+  stageBottom: {
+    paddingBottom: 8,
+  },
   sessionBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -309,57 +351,63 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   reconciliationBar: {
-    backgroundColor: '#182838',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     borderWidth: 1,
-    borderColor: '#2A4A62',
+    borderColor: 'rgba(255,255,255,0.25)',
     marginHorizontal: 12,
-    marginTop: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
   },
-  reconciliationReady: {
-    backgroundColor: '#173D2B',
-    borderColor: '#2D7A4A',
-  },
   reconciliationException: {
-    backgroundColor: '#4A3512',
-    borderColor: '#8A621A',
+    backgroundColor: 'rgba(74,53,18,0.55)',
+    borderColor: 'rgba(138,98,26,0.75)',
   },
   reconciliationTitle: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
   },
   reconciliationText: {
-    color: '#B0C4D8',
+    color: '#E0E8F0',
     fontSize: 11,
     lineHeight: 16,
     marginTop: 3,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
   },
   lastScanToast: {
-    position: 'absolute',
-    top: 140,
-    left: 20,
-    right: 20,
-    backgroundColor: '#1A3A2A',
+    marginHorizontal: 12,
+    marginTop: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.45)',
     padding: 14,
     borderRadius: 10,
-    zIndex: 10,
   },
   lastScanText: {
     color: '#4ADE80',
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
   },
-  exceptionButton: { alignSelf: 'center', marginTop: 10, backgroundColor: '#B45309', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  exceptionButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  exceptionButton: { alignSelf: 'center', marginTop: 8, backgroundColor: '#B45309', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  exceptionButtonText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   scanActions: {
-    flexDirection: 'row',
     padding: 16,
     gap: 12,
     backgroundColor: '#1A2332',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
   secondaryButton: {
     flex: 1,
@@ -385,6 +433,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+  cancelButton: {
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#F87171',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   linkedUnitsLoading: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -392,22 +453,30 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 8,
   },
-  linkedUnitsLoadingText: { color: '#8899AA', fontSize: 13 },
+  linkedUnitsLoadingText: {
+    color: '#E0E8F0',
+    fontSize: 13,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
+  },
   qsealCountBar: {
-    backgroundColor: '#1A2332',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     marginHorizontal: 12,
-    marginBottom: 6,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2A3A4A',
+    borderColor: 'rgba(255,255,255,0.25)',
   },
   qsealCountText: {
     color: '#4ADE80',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
   },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
   modalCard: { backgroundColor: '#1A2332', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '88%' },

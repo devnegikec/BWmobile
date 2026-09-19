@@ -11,6 +11,7 @@ import type {
   ItemRejectionState,
   InboundScanExceptionInput,
   QSealParentWithUnits,
+  StartSessionRequest,
 } from '@/types';
 import * as inboundService from '@/api/inboundService';
 import * as qsealService from '@/api/qsealService';
@@ -86,10 +87,12 @@ export const useInboundStore = create<InboundState>((set, get) => ({
   startSession: async (warehouseId, dockLocation, asnOrderId?) => {
     set({ isLoading: true, error: null });
     try {
-      const payload: { warehouse_id: string; dock_location: string; asn_order_id?: string } = {
-        warehouse_id: warehouseId,
-        dock_location: dockLocation,
-      };
+      const payload: StartSessionRequest = { warehouse_id: warehouseId };
+      // Dock location is optional — omit the key entirely when blank so the
+      // backend does not receive an empty string for a blind receipt.
+      if (dockLocation) {
+        payload.dock_location = dockLocation;
+      }
       if (asnOrderId) {
         payload.asn_order_id = asnOrderId;
       }
