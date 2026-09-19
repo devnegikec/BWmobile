@@ -5,7 +5,30 @@ import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
   container: { flex: 1 },
-  camera: { flex: 1 },
+
+  /**
+   * The camera preview needs a parent that definitely has a real, non-zero
+   * size. `flex: 1` alone can resolve to zero height when sibling bars (session
+   * header, reconciliation, action buttons) eat the column, which shows up as
+   * an empty/black area with only the overlay text visible. The minHeight makes
+   * that impossible.
+   */
+  cameraWrap: {
+    flex: 1,
+    minHeight: 260,
+    backgroundColor: '#000',
+  },
+  /**
+   * Absolute-fill rather than `flex: 1`: the preview then always fills the
+   * measured wrapper instead of relying on its own flex measurement.
+   */
+  camera: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   centered: {
     flex: 1,
     justifyContent: 'center',
@@ -50,6 +73,20 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // ---- Camera overlay: the whole preview stays clear ----
+  // Deliberately no scrim and no mask. The operator must always see exactly
+  // what the camera sees, so readability of the hints below comes from a text
+  // shadow rather than from darkening the preview.
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   closeButton: {
     position: 'absolute',
     top: 50,
@@ -86,12 +123,18 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 32,
     textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   subtitle: {
-    color: '#ccc',
+    color: '#fff',
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   // Scan success indicator (brief flash after each scan)
   scannedIndicator: {
