@@ -107,6 +107,19 @@ export function useInboundFlow() {
     void refreshReconciliation();
   }, [currentSession?.id, currentSession?.asn_order_id, refreshReconciliation]);
 
+  // Reset every piece of local state back to the idle start screen. Shared by
+  // end-session, cancel-session and start-new-session so the three paths can
+  // never drift apart.
+  const resetToIdle = useCallback(() => {
+    clearSession();
+    clearLinkedUnits();
+    setDockLocation('');
+    setShowAsnPicker(false);
+    setReconciliation(null);
+    scannedQSealSerials.current = new Set();
+    setStep('idle');
+  }, [clearSession, clearLinkedUnits]);
+
   // ============ HANDLERS ============
 
   const handleStartSession = async () => {
@@ -380,13 +393,7 @@ export function useInboundFlow() {
   };
 
   const handleNewSession = () => {
-    clearSession();
-    clearLinkedUnits();
-    setDockLocation('');
-    setShowAsnPicker(false);
-    setReconciliation(null);
-    scannedQSealSerials.current = new Set();
-    setStep('idle');
+    resetToIdle();
   };
 
   const handleCancelSession = () => {
@@ -398,14 +405,31 @@ export function useInboundFlow() {
         {
           text: 'Cancel Session',
           style: 'destructive',
-          onPress: () => {
-            clearSession();
-            clearLinkedUnits();
-            setDockLocation('');
-            setShowAsnPicker(false);
-            setReconciliation(null);
-            scannedQSealSerials.current = new Set();
-            setStep('idle');
+          onPress: async () => {
+            // Close the session on the SERVER first. Resetting local state
+            // without this leaves the session OPEN on the backend, which then
+            // rejects the next "Start Session" with an existing-open-session
+            // conflict.
+            const sessionId = useInboundStore.getState().currentSession?.id;
+            if (sessionId) {
+              try {
+                await cancelInboundSession(sessionId);
+              } catch (err: any) {
+                const status = err?.response?.status;
+                // 404/409 mean it is already gone or closed on the server, so
+                // there is nothing left to cancel — safe to reset locally.
+                if (status !== 404 && status !== 409) {
+                  Alert.alert(
+                    'Cancel Failed',
+                    err?.response?.data?.message ||
+                      err?.message ||
+                      'Could not cancel the session on the server. Please try again.'
+                  );
+                  return; // Keep local state so the user can retry.
+                }
+              }
+            }
+            resetToIdle();
           },
         },
       ]
