@@ -103,7 +103,9 @@ export default function InboundScanningView({
         </TouchableOpacity>
         <View style={styles.sessionInfo}>
           <Text style={styles.sessionLabel}>Session Active</Text>
-          <Text style={styles.sessionDock}>{session.dock_location}</Text>
+          {session.dock_location ? (
+            <Text style={styles.sessionDock}>{session.dock_location}</Text>
+          ) : null}
           {session.asn_order_no && (
             <Text style={styles.sessionAsn}>📋 {session.asn_order_no}</Text>
           )}
@@ -153,7 +155,7 @@ export default function InboundScanningView({
       <QrScanner
         onScan={onScan}
         title="Scan Item QR Code"
-        subtitle={`Dock: ${session.dock_location}`}
+        subtitle={session.dock_location ? `Dock: ${session.dock_location}` : undefined}
       />
 
       {/* Last scan feedback */}

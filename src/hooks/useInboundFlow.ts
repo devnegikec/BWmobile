@@ -114,10 +114,6 @@ export function useInboundFlow() {
       Alert.alert('Error', 'Please select a warehouse first.');
       return;
     }
-    if (!dockLocation.trim()) {
-      Alert.alert('Error', 'Please enter a dock location.');
-      return;
-    }
 
     const doStart = async () => {
       clearLinkedUnits();

@@ -50,6 +50,7 @@ export default function StartSessionView({
       title="Inbound Receiving"
       subtitle="Start a new receiving session"
       scrollable
+      showHomeButton={false}
     >
       <View style={styles.formContainer}>
         <View style={styles.inputGroup}>
@@ -58,7 +59,7 @@ export default function StartSessionView({
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Dock Location</Text>
+          <Text style={styles.label}>Dock Location (Optional)</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g., Dock-A-12"
