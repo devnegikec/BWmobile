@@ -73,9 +73,11 @@ export default function ReturnsScreen({ navigation }: any) {
           text: 'Open',
           onPress: async () => {
             setOpeningId(registration.id);
-            await handleOpenSession(registration);
+            // Only navigate once a session is actually live — a failed open
+            // must not drop the operator on an empty receive screen.
+            const opened = await handleOpenSession(registration);
             setOpeningId(null);
-            navigation.navigate('ReturnReceive');
+            if (opened) navigation.navigate('ReturnReceive');
           },
         },
       ]

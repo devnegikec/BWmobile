@@ -116,6 +116,13 @@ interface ReturnsState {
 export const usePendingReturnItems = (): ReturnSessionItem[] =>
   useReturnsStore((state) => state.items.filter((item) => item.condition === null));
 
+/**
+ * Monotonic token for `fetchReasonCodes`. Only the most recent request is
+ * allowed to write the picker, so a slower response for a condition the
+ * operator has already navigated away from cannot overwrite the current list.
+ */
+let reasonCodesRequestId = 0;
+
 export const useReturnsStore = create<ReturnsState>((set, get) => ({
   registrations: [],
   selectedRegistration: null,
@@ -225,6 +232,11 @@ export const useReturnsStore = create<ReturnsState>((set, get) => ({
       });
 
       set((state) => {
+        // The session may have been reset or replaced while this request was in
+        // flight (§5.4 recovery, cancel, end). Writing then would inject a
+        // stale item and counters into the session now on screen.
+        if (state.currentSession?.id !== session.id) return { isScanning: false };
+
         // Upsert the item instead of appending — a repeat scan must move the
         // counters forward, never duplicate the row (task 3.6).
         const exists = state.items.some((item) => item.id === scan.item_id);
@@ -287,6 +299,10 @@ export const useReturnsStore = create<ReturnsState>((set, get) => ({
     try {
       const result = await returnsService.classifyReturnItem(session.id, payload);
       set((state) => {
+        // Same guard as `scanUnit`: a superseded response must never overwrite
+        // another session's items or `classified_qty`.
+        if (state.currentSession?.id !== session.id) return { isSubmitting: false };
+
         const nextItems = state.items.map((item) =>
           item.id === result.item_id
             ? {
@@ -340,6 +356,9 @@ export const useReturnsStore = create<ReturnsState>((set, get) => ({
       // ✅ live: a bare array of per-item results.
       const byId = new Map(result.map((r) => [r.item_id, r]));
       set((state) => {
+        // Same guard as `classifyItem` — the bulk path shares the race.
+        if (state.currentSession?.id !== session.id) return { isSubmitting: false };
+
         const nextItems = state.items.map((item) => {
           const applied = byId.get(item.id);
           return applied
@@ -422,14 +441,18 @@ export const useReturnsStore = create<ReturnsState>((set, get) => ({
   // hard-coded here. The fetched list is cached against the condition it was
   // loaded for.
   fetchReasonCodes: async (condition) => {
+    const requestId = ++reasonCodesRequestId;
     set({ isFetchingReasons: true });
     try {
       const reasonCodes = await getExceptionReasons(condition);
+      // Superseded by a newer request — its response owns the picker.
+      if (requestId !== reasonCodesRequestId) return;
       set({ reasonCodes, reasonCodesCondition: condition, isFetchingReasons: false });
     } catch (err: any) {
       // Non-fatal: the picker shows its own empty state; do not clobber the
       // screen-level error for a background lookup.
       console.warn('[Returns] Failed to load reason codes:', err?.message);
+      if (requestId !== reasonCodesRequestId) return;
       set({ reasonCodes: [], reasonCodesCondition: condition, isFetchingReasons: false });
     }
   },

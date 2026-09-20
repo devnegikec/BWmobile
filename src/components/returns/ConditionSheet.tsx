@@ -63,6 +63,8 @@ interface Props {
   reasonCodes: ExceptionReason[];
   isFetchingReasons: boolean;
   isSubmitting: boolean;
+  /** §5.2 — classification is never queued offline, so it is blocked here. */
+  isOffline: boolean;
   /** Set when this sheet is re-opened to change an existing classification. */
   isOverride?: boolean;
   onLoadReasons: (condition: ReturnCondition) => void;
@@ -77,6 +79,7 @@ export default function ConditionSheet({
   reasonCodes,
   isFetchingReasons,
   isSubmitting,
+  isOffline,
   isOverride = false,
   onLoadReasons,
   onClose,
@@ -116,6 +119,9 @@ export default function ConditionSheet({
   const isNonGood = condition !== null && condition !== 'good';
 
   const handleCondition = (value: ReturnCondition) => {
+    // §5.2 — a stock-moving request is never queued offline. The sheet may have
+    // been opened while the link was healthy, so re-check at tap time.
+    if (isOffline) return;
     setShowReasonError(false);
     setCondition(value);
     if (value === 'good') {
@@ -125,6 +131,7 @@ export default function ConditionSheet({
   };
 
   const handleSave = () => {
+    if (isOffline) return;
     if (!condition) {
       setShowReasonError(true);
       return;
@@ -163,6 +170,10 @@ export default function ConditionSheet({
           </View>
 
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {isOffline && (
+              <Text style={styles.offlineHint}>Offline — reconnect to save a condition.</Text>
+            )}
+
             {/* ---- Four large buttons ---- */}
             <View style={styles.conditionGrid}>
               {CONDITIONS.map((option) => {
@@ -176,7 +187,7 @@ export default function ConditionSheet({
                       active && { backgroundColor: option.color },
                     ]}
                     onPress={() => handleCondition(option.value)}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isOffline}
                     accessibilityRole="button"
                     accessibilityLabel={`Mark ${option.label}`}
                   >
@@ -273,9 +284,9 @@ export default function ConditionSheet({
           {isNonGood && (
             <View style={styles.footer}>
               <TouchableOpacity
-                style={[styles.saveBtn, isSubmitting && styles.saveBtnDisabled]}
+                style={[styles.saveBtn, (isSubmitting || isOffline) && styles.saveBtnDisabled]}
                 onPress={handleSave}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isOffline}
               >
                 {isSubmitting ? (
                   <ActivityIndicator color="#FFFFFF" />
@@ -372,6 +383,7 @@ const styles = StyleSheet.create({
   helperText: { color: '#667788', fontSize: 12, marginTop: 8 },
   defaultHint: { color: '#8FA3B5', fontSize: 12, marginTop: 12, fontStyle: 'italic' },
   inlineError: { color: '#F87171', fontSize: 13, marginTop: 8 },
+  offlineHint: { color: '#FCD34D', fontSize: 13, marginBottom: 6 },
   emptyReasons: { color: '#8FA3B5', fontSize: 13, fontStyle: 'italic' },
   footer: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 18 },
   saveBtn: {

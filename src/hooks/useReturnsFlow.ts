@@ -178,7 +178,7 @@ export function useReturnsFlow() {
   // 2. Open a session (§3.1) — resume on `RETURN_SESSION_ALREADY_OPEN`.
   // ---------------------------------------------------------
   const handleOpenSession = useCallback(
-    async (registration: ReturnRegistration) => {
+    async (registration: ReturnRegistration): Promise<boolean> => {
       try {
         const session = await openSession(
           registration.id,
@@ -193,22 +193,31 @@ export function useReturnsFlow() {
         await rememberSession(session.id);
         setIsOnline(true);
         setStep('scanning');
+        return true;
       } catch (err) {
         // One open session per registration — resume it instead of erroring.
         if (err instanceof ReturnFlowError && err.code === 'RETURN_SESSION_ALREADY_OPEN') {
           const storedId = await AsyncStorage.getItem(SESSION_KEY);
           if (storedId) {
             try {
-              await resumeSession(storedId);
-              await rememberSession(storedId);
-              setStep('scanning');
-              return;
+              const resumed = await resumeSession(storedId);
+              // `SESSION_KEY` is a single global pointer, so it may belong to a
+              // DIFFERENT registration. Adopting it blindly would open the wrong
+              // return, so require an exact match on both id and status (§5.4).
+              if (resumed.registration_id === registration.id && resumed.status === 'open') {
+                await rememberSession(storedId);
+                setStep('scanning');
+                return true;
+              }
             } catch {
               // Fall through to the normal error path below.
             }
           }
         }
+        // Report the failure to the caller instead of resolving normally — the
+        // screen must not navigate to a receive screen with no live session.
         handleError(err, 'Could not open the return session.');
+        return false;
       }
     },
     [openSession, dockLocation, rememberSession, resumeSession, handleError]
@@ -291,11 +300,19 @@ export function useReturnsFlow() {
         /** Set when re-sending a classification to change the reason. */
         override?: boolean;
       }
-    ) => {
+    ): Promise<boolean> => {
       // Non-good without a reason never leaves the device (§4.3, task 6.4).
       if (condition !== 'good' && !options?.reasonCode) {
         showNotice({ tone: 'error', message: 'Select a reason before saving.' });
-        return;
+        return false;
+      }
+
+      // §5.2 — classification moves stock and is NEVER queued offline. The
+      // sheet may already be open from when connectivity was healthy, so
+      // re-check here instead of trusting the gate at open time.
+      if (!isOnline) {
+        showNotice({ tone: 'error', message: 'Offline — reconnect to save the condition.' });
+        return false;
       }
 
       try {
@@ -313,11 +330,16 @@ export function useReturnsFlow() {
         };
         await classifyItem(payload);
         setIsOnline(true);
+        return true;
       } catch (err) {
-        handleError(err, 'Could not save the condition. Connect and try again.');
+        // Surface the reason and keep the sheet open so the operator's typed
+        // reason/note are not silently discarded.
+        const message = handleError(err, 'Could not save the condition. Connect and try again.');
+        showNotice({ tone: 'error', message });
+        return false;
       }
     },
-    [classifyItem, showNotice, handleError]
+    [classifyItem, showNotice, handleError, isOnline]
   );
 
   /** "All good" for a carton — one round-trip for every pending unit (§4.3). */

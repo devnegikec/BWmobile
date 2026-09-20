@@ -122,7 +122,7 @@ assigns without error.
 | 2.6 | `classifyReturnItem(sessionId, payload)` + `override` flag for "Change reason" — §3.4 | same | Re-sending the same item without `override` → `409`; with `override: true` → `201` | ☐ |
 | 2.7 | `classifyReturnItemsBulk(sessionId, items[])` — §3.4 | same | Bulk-good on a 3-unit carton classifies all three in one round-trip | ☐ |
 | 2.8 | `endReturnSession(sessionId, { note })` — §3.5 | same | Returns `receipt_note.note_no` + `conditions` breakdown | ☐ |
-| 2.9 | Wrap `POST /inbound/exceptions/unreadable-qr` (reuse — do **not** reimplement) — §3.6, §4.2 | `src/api/inboundService.ts` | Call succeeds against today's live backend 🟢 | ☐ |
+| 2.9 | Wrap `POST /returns/sessions/{id}/unreadable` (returns-scoped — **do not** use `/inbound/exceptions/unreadable-qr`, it 404s for return session ids) — §3.6, §4.2 | `src/api/returnsService.ts` | Call succeeds against today's live backend 🟢 | ☐ |
 | 2.10 | Wrap `GET /inbound/exception-reasons` for the reason picker | same | Returns the categories used by §4.3 filtering | ☐ |
 
 **Phase 2 exit**: every call is exercised once from a scratch screen/log before any UI is built.

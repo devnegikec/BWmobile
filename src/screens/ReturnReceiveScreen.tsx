@@ -370,18 +370,21 @@ export default function ReturnReceiveScreen({ navigation }: any) {
         reasonCodes={reasonCodes}
         isFetchingReasons={isFetchingReasons}
         isSubmitting={isSubmitting}
+        isOffline={offline}
         isOverride={isOverride}
         onLoadReasons={loadReasonCodes}
         onClose={() => setSheetItem(null)}
         onSubmit={async (submit: ConditionSubmit) => {
           if (!sheetItem) return;
-          await handleClassify(sheetItem, submit.condition, {
+          const saved = await handleClassify(sheetItem, submit.condition, {
             reasonCode: submit.reasonCode,
             note: submit.note,
             destination: submit.destination,
             override: submit.override,
           });
-          setSheetItem(null);
+          // Keep the sheet open on failure so the operator's reason and note
+          // are not discarded, and the error stays visible.
+          if (saved) setSheetItem(null);
         }}
       />
 
