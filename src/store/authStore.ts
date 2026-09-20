@@ -6,6 +6,7 @@ import type { User, Worker, Warehouse } from '@/types';
 import * as authService from '@/api/authService';
 import { getAccessToken, setOnTokensCleared } from '@/api/client';
 import { getBackendErrorMessage } from '@/utils/errors';
+import { getPermissionsFromToken } from '@/utils/jwt';
 
 // ------------------------------------------------------------
 // Normalise any backend/network failure into a plain string.
@@ -67,6 +68,13 @@ interface AuthState {
   warehouses: Warehouse[];
   selectedWarehouse: Warehouse | null;
   error: string | null;
+  /**
+   * Permission codes decoded from the ACCESS TOKEN.
+   * ⚠ `user.permissions` can be an EMPTY array even when the token is fully
+   * populated (observed for `warehouse_work_user`), so the token is the
+   * authoritative source — see `src/utils/jwt.ts`. `null` = not yet known.
+   */
+  permissions: string[] | null;
 
   // Actions
   loginWithPassword: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
@@ -87,6 +95,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   warehouses: [],
   selectedWarehouse: null,
   error: null,
+  permissions: null,
 
   // ---------- Username/Password Login ----------
   loginWithPassword: async (email, password, rememberMe = false) => {
@@ -106,6 +115,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         user: response.user,
         worker: null,
+        permissions: getPermissionsFromToken(response.access_token),
         isLoading: false,
       });
     } catch (error: any) {
@@ -147,6 +157,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         worker: response.worker,
         user: null,
+        permissions: getPermissionsFromToken(response.access_token),
         isLoading: false,
       });
     } catch (error: any) {
@@ -183,6 +194,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         user: response.user,
         worker: null,
+        permissions: getPermissionsFromToken(response.access_token),
         isLoading: false,
       });
     } catch (error: any) {
@@ -235,6 +247,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       warehouses: [],
       selectedWarehouse: null,
       error: null,
+      permissions: null,
     });
   },
 
@@ -248,6 +261,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       // Token exists — validate it by loading warehouses
       // If this fails with 401, the interceptor clears tokens and triggers logout
+      // Decode permissions from the stored token FIRST: `checkAuth` does not
+      // restore `user`, so the token is the only permission source after a
+      // cold start.
+      const permissions = getPermissionsFromToken(token);
       try {
         const warehouses = await authService.getMyWarehouses();
         const defaultWarehouse =
@@ -256,6 +273,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isAuthenticated: true,
           warehouses,
           selectedWarehouse: defaultWarehouse,
+          permissions,
         });
       } catch (err: any) {
         // 401 = token invalid/expired, let interceptor handle cleanup
@@ -264,7 +282,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           return false;
         }
         // Network error — still allow (offline-first), but mark as needing refresh
-        set({ isAuthenticated: true });
+        set({ isAuthenticated: true, permissions });
       }
       return true;
     } catch {

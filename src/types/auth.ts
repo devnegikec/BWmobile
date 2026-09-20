@@ -39,6 +39,13 @@ export interface User {
   organization_id: string;
   is_active: boolean;
   email_verified: boolean;
+  /**
+   * Permission codes granted to this account (e.g. `return.read`).
+   * ⚠ optional: the returns MVP (`R-10` / `X-02`) adds the `return.*` codes and
+   * the token payload may not carry them yet. Callers MUST treat `undefined`
+   * as "not yet known" rather than "denied" — see `src/utils/permissions.ts`.
+   */
+  permissions?: string[];
 }
 
 export interface LoginResponse extends TokenResponse {
@@ -64,6 +71,8 @@ export interface Worker {
   barcode: string;
   last_login_at: string;
   created_at: string;
+  /** See `User.permissions` — `undefined` means "not yet known". */
+  permissions?: string[];
 }
 
 export interface WorkerLoginResponse extends TokenResponse {

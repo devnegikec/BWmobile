@@ -8,6 +8,7 @@
 //   ./pick.ts    — pick lists (outbound)
 //   ./putaway.ts — put-away, tracking & bin QR
 //   ./qseal.ts   — QSeal scans, nodes & linked units
+//   ./returns.ts — return registrations, sessions & condition capture
 //
 // This file re-exports everything so existing imports from
 // '../types' keep working unchanged.
@@ -19,3 +20,4 @@ export * from '@/types/inbound';
 export * from '@/types/pick';
 export * from '@/types/putaway';
 export * from '@/types/qseal';
+export * from '@/types/returns';
