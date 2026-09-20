@@ -62,24 +62,87 @@ export interface ReturnWarehouseRef {
   name: string;
 }
 
+/** ⚠ inferred: same shape as `ReturnWarehouseRef`. */
+export interface ReturnPartyRef {
+  id: string;
+  name: string;
+}
+
 /**
- * A return registration awaiting receipt.
- * `expected_qty` / `received_qty` are confirmed by §8 case 1 (list payload).
+ * A return registration awaiting receipt — **list** shape (§8 case 1).
+ *
+ * ✅ Verified against the live API: the list endpoint returns FLAT warehouse
+ * and party names, unlike `GET /returns/registrations/{id}` which nests
+ * `warehouse` / `party` objects. See `ReturnRegistrationDetail`.
  */
 export interface ReturnRegistration {
   id: string;
   registration_no: string;
   status: ReturnRegistrationStatus;
-  warehouse?: ReturnWarehouseRef;
+  /** e.g. `delivery_note`. ✅ live */
+  reference_type?: string;
+  invoice_no?: string | null;
+  /** ✅ live — flat, list-only. */
+  party_name?: string | null;
+  /** ✅ live — flat, list-only. */
+  warehouse_name?: string | null;
+  /** ✅ live — flat, list-only. */
+  warehouse_id?: string | null;
+  /**
+   * The reason the registration was created with.
+   * ✅ live on BOTH the list and the detail endpoint — pre-selects the picker
+   * (task 6.9) without an extra round-trip.
+   */
+  return_reason_code?: string | null;
   expected_qty: number;
   received_qty: number;
-  /** ⚠ inferred */
   created_at?: string;
-  /** ⚠ inferred */
-  updated_at?: string;
 }
 
-/** Expected line + registered serials — §3.2 `lines[]`. */
+/** One expected line of a registration DETAIL response — ✅ live shape. */
+export interface ReturnRegistrationDetailLine {
+  id: string;
+  sku: string;
+  item_name: string;
+  uom: string;
+  expected_qty: number;
+  received_qty: number;
+  serials: string[];
+  /** Per-condition counts; zeroed until units are classified. */
+  conditions?: Record<ReturnCondition, number>;
+}
+
+/**
+ * `GET /returns/registrations/{id}` — ✅ verified live.
+ *
+ * Distinct from the list row: it nests `warehouse` / `party` objects, carries
+ * the registration's original `return_reason_code` (task 6.9 defaults the
+ * picker from it), and its `lines[]` use `id` / `received_qty` rather than the
+ * session's `line_id` / `scanned_qty`.
+ */
+export interface ReturnRegistrationDetail {
+  id: string;
+  registration_no: string;
+  status: ReturnRegistrationStatus;
+  reference_type?: string;
+  invoice_no?: string | null;
+  party?: ReturnPartyRef;
+  warehouse?: ReturnWarehouseRef;
+  /** The reason the registration was created with — pre-selects the picker. */
+  return_reason_code?: string | null;
+  note?: string | null;
+  expected_qty: number;
+  received_qty: number;
+  created_at?: string;
+  lines: ReturnRegistrationDetailLine[];
+  /** ⚠ live: present as an empty array on a fresh registration. */
+  sessions?: unknown[];
+}
+
+/**
+ * Session line — ✅ verified live via `GET /returns/sessions/{id}`.
+ * Note these differ from `ReturnRegistrationDetailLine`.
+ */
 export interface ReturnRegistrationLine {
   line_id: string;
   sku: string;
@@ -108,6 +171,8 @@ export interface ReturnSession {
   status: ReturnSessionStatus;
   dock_location?: string | null;
   started_at: string;
+  /** ✅ live — present as `null` while the session is open. */
+  ended_at?: string | null;
   expected_qty: number;
   scanned_qty: number;
   classified_qty: number;
@@ -181,10 +246,27 @@ export interface EndReturnSessionRequest {
   note?: string;
 }
 
-/** `POST /inbound/exceptions/unreadable-qr` — §4.2 (live endpoint, reused) */
+/**
+ * `POST /returns/sessions/{id}/unreadable` — §4.2.
+ * ✅ verified live. The session id is in the PATH, not the body.
+ * `carton_reference` is required; everything else is optional.
+ */
+export interface ReturnUnreadableReportRequest {
+  /** What the operator READS off the carton — never a typed identity. */
+  carton_reference: string;
+  sku?: string;
+  batch_number?: string;
+  quantity?: number;
+  note?: string;
+}
+
+/**
+ * Legacy inbound-only variant — `POST /inbound/exceptions/unreadable-qr`.
+ * ⚠ The returns flow uses `ReturnUnreadableReportRequest` instead; this
+ * endpoint's `session_id` must be an INBOUND scan session.
+ */
 export interface UnreadableQrRequest {
   session_id: string;
-  /** What the operator reads off the carton — never a typed identity. */
   carton_reference: string;
   sku?: string;
   batch_number?: string;
@@ -212,28 +294,35 @@ export interface ReturnScanResponse {
   next_action: ReturnNextAction;
 }
 
-/** `POST …/classify` — §3.4 */
+/** `POST …/classify` — §3.4. ✅ verified live. */
 export interface ReturnClassifyResponse {
   item_id: string;
   condition: ReturnCondition;
+  /** ✅ live — the server fills `RETURN_GOOD` for a good unit. */
   reason_code: string | null;
-  /** Server-derived from the reason's `default_destination`, else `QUARANTINE`. */
-  destination: ReturnDestination;
+  /**
+   * ✅ live — `null` for a `good` unit. Server-derived from the reason's
+   * `default_destination`, else `QUARANTINE` for non-good conditions.
+   */
+  destination: ReturnDestination | null;
   /** `null` for a `good` unit — classifying non-good creates the exception. */
   exception_id: string | null;
   exception_status: ReturnExceptionStatus | null;
 }
 
-/** `POST …/classify` (bulk) — §3.4. ⚠ inferred: per-item results. */
-export interface ReturnClassifyBulkResponse {
-  items: ReturnClassifyResponse[];
-}
+/**
+ * `POST …/classify/bulk` — §3.4.
+ * ✅ verified live: the endpoint returns a BARE ARRAY of per-item results, not
+ * an `{ items: [...] }` envelope. `classifyReturnItemsBulk` normalises it.
+ */
+export type ReturnClassifyBulkResponse = ReturnClassifyResponse[];
 
-/** `POST /returns/sessions/{id}/end` — §3.5 */
+/** `POST /returns/sessions/{id}/end` — §3.5. ✅ verified live. */
 export interface ReturnReceiptNoteRef {
   id: string;
   note_no: string;
-  status: 'draft' | string;
+  /** ✅ live value observed: `pending_approval` (the doc implied `draft`). */
+  status: string;
 }
 
 /** `POST /returns/sessions/{id}/end` — §3.5 */
@@ -248,14 +337,46 @@ export interface EndReturnSessionResponse {
   next: string;
 }
 
-/** `POST /inbound/exceptions/unreadable-qr` — §4.2 */
+/**
+ * Response for reporting an unreadable label — ✅ verified live for BOTH
+ * `POST /returns/sessions/{id}/unreadable` and the inbound variant: both return
+ * the created inbound EXCEPTION object, keyed by `id`.
+ */
 export interface UnreadableQrResponse {
+  id: string;
   reason_code: string;
-  destination: ReturnDestination;
-  status: ReturnExceptionStatus | string;
-  /** ⚠ inferred: the doc shows `…` for the remaining envelope fields. */
-  exception_id?: string;
-  message?: string;
+  status: string;
+  condition_code?: string;
+  destination: ReturnDestination | null;
+  qr_identifier?: string | null;
+  serial_number?: string | null;
+  sku?: string | null;
+  item_name?: string | null;
+  batch_number?: string | null;
+  quantity?: number;
+  note?: string | null;
+  created_at?: string;
+}
+
+// ---------- Reason codes (reused live endpoint) ----------
+
+/**
+ * `GET /inbound/exception-reasons` — §3.6, §4.3.
+ * ✅ verified live: `{ code, name, category, default_destination, requires_approval }`.
+ *
+ * ✅ The endpoint filters SERVER-SIDE by `condition` (`damaged` → 3 codes,
+ * `hold` → 1, `quarantine` → 1, `good` → 1), so the app hard-codes nothing.
+ */
+export interface ExceptionReason {
+  code: string;
+  /** ✅ live — display name, e.g. "Returned damaged". */
+  name?: string;
+  /** ✅ live — e.g. `return_damage`, `hold`, `quarantine`, `damage`. */
+  category?: string;
+  /** ✅ live — may be `null` (e.g. `RETURN_GOOD`). */
+  default_destination?: ReturnDestination | null;
+  /** ✅ live. */
+  requires_approval?: boolean;
 }
 
 // ---------- Errors ----------

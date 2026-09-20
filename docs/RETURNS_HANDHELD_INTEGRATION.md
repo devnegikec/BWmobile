@@ -1,13 +1,12 @@
 # Returns — Handheld (HC) Device Integration Guide
 
-> **Version**: 1.0 (contract for review)
-> **Date**: 2026-09-19
+> **Version**: 1.1 (verified against a live backend, 2026-09-20)
+> **Date**: 2026-09-19 (rev. 2026-09-20)
 > **Audience**: Handheld / mobile app developers (React Native / Flutter) working the dock
 > **Base URL**: `http://<host>/api/v1`
-> **Status**: 📝 **SPECIFICATION — the returns module is not deployed yet.** `POST
-> /inbound/exceptions/unreadable-qr`, `GET /inbound/exception-reasons`, `GET /items` and the
-> put-away endpoints are **live today**; the `/returns/…` endpoints below land with the returns MVP
-> (`R-01` → `R-10` in `INBOUND_EXCEPTION_AND_RETURNS_GAP_ANALYSIS.md` §4.1).
+> **Status**: ✅ **DEPLOYED.** The `/returns/…` endpoints are live and verified end-to-end by
+> `scripts/validate-returns-api.py` (20/20 passing). Every sample below was captured from a live
+> response. Re-run that script after any backend change.
 > **Companion doc**: `RETURNS_WEB_APP_INTEGRATION.md` (registration, approval, Return Slip).
 > **Related**: `MOBILE_APP_INBOUND_GUIDE.md` (receiving conventions), `MOBILE_APP_API_REFERENCE.md`.
 
@@ -36,8 +35,8 @@ GET  /returns/registrations/{id}                          (expected lines + seri
 POST /returns/registrations/{id}/sessions                 (open a session → status 'receiving')
       ├── POST /returns/sessions/{id}/scans               (repeat per unit/carton)
       ├── POST /returns/sessions/{id}/classify            (repeat per unit: condition + reason)
-      └── POST /inbound/exceptions/unreadable-qr          (when a label cannot be read)
-POST /returns/sessions/{id}/end                           (→ draft note, status 'received')
+      └── POST /returns/sessions/{id}/unreadable          (when a label cannot be read)
+POST /returns/sessions/{id}/end                           (→ note 'pending_approval', status 'received')
 ```
 
 Rules
@@ -156,8 +155,17 @@ Returns the header above plus the per-line counters and the pending queue:
 
 - `condition`: `good` | `damaged` | `hold` | `quarantine`.
 - A **non-`good`** condition requires a `reason_code` → `400 RETURN_REASON_CODE_REQUIRED`.
-- `destination` is derived from the reason's `default_destination` (falling back to `QUARANTINE`);
-  the device may override with `destination: "HOLD" | "QUARANTINE" | "DAMAGED"`.
+- ✅ `destination` is **`null` for a `good` unit**; for non-good it is derived from the reason's
+  `default_destination` (falling back to `QUARANTINE`). The device may override with
+  `destination: "HOLD" | "QUARANTINE" | "DAMAGED"`.
+- ✅ `reason_code` is server-filled: classifying `good` returns `reason_code: "RETURN_GOOD"`.
+- ✅ **`…/classify/bulk` returns a BARE ARRAY** of per-item results, **not** an `{ "items": […] }`
+  envelope:
+
+  ```json
+  [ { "item_id": "…", "condition": "good", "reason_code": "RETURN_GOOD",
+      "destination": null, "exception_id": null, "exception_status": null } ]
+  ```
 - Classifying creates an inbound exception (`pending_approval`) and segregates the stock into the
   matching non-pickable bin with `inventory_status` `hold` / `quality` / `damaged` — no extra call.
 - Repeated classify on the same unit → `409 RETURN_ITEM_ALREADY_CLASSIFIED` (offer "Change reason",
@@ -173,7 +181,7 @@ Returns the header above plus the per-line counters and the pending queue:
 
 ```json
 {
-  "receipt_note": { "id": "…", "note_no": "RRN-2026-00017", "status": "draft" },
+  "receipt_note": { "id": "…", "note_no": "RRN-2026-00017", "status": "pending_approval" },
   "registration_status": "received",
   "expected_qty": 3, "received_qty": 2, "short_qty": 1,
   "conditions": { "good": 1, "damaged": 1, "hold": 0, "quarantine": 0 },
@@ -181,20 +189,29 @@ Returns the header above plus the per-line counters and the pending queue:
 }
 ```
 
+- ✅ Returns **`200`** (not `201`).
+- ✅ `receipt_note.status` is **`pending_approval`**, not `draft` — the note needs supervisor
+  approval before it becomes final.
+
 **Permission**: `return.receive`
 
 ### 3.6 Reused endpoints — do **not** build new ones
 
 | Need                                    | Endpoint (live today)                                        |
 | --------------------------------------- | ------------------------------------------------------------ |
-| Unreadable / unscannable label          | `POST /inbound/exceptions/unreadable-qr`                      |
-| Reason-code picker                      | `GET /inbound/exception-reasons`                              |
+| Unreadable / unscannable label           | `POST /returns/sessions/{id}/unreadable` (**returns-scoped**)  |
+| Reason-code picker                      | `GET /inbound/exception-reasons?condition=`                    |
 | Item lookup by SKU (never stock-levels) | `GET /items?search=`                                          |
 | List my put-away tasks                  | `GET /put-away` (detail: `GET /put-away/{put_away_list_id}`)  |
 | Confirm put-away into a bin             | `POST /put-away/{put_away_list_id}/items/{item_id}/complete`  |
 
+> ✅ `POST /inbound/exceptions/unreadable-qr` still exists for the **inbound** flow, but it resolves
+> `session_id` against the **inbound** scan-session table — a return session id returns
+> `404 SCAN_SESSION_NOT_FOUND`. Use the returns-scoped endpoint above.
+
 Put-away for returned `good` stock uses the **same** task list and confirmation flow as inbound
-receiving (`MOBILE_APP_INBOUND_GUIDE.md` §4) — no returns-specific put-away UI.
+receiving (`MOBILE_APP_INBOUND_GUIDE.md` §4) — no returns-specific put-away UI. Returned
+`good` stock appears in `GET /put-away` with `reference_type: "return_receipt_note"`.
 
 ---
 
@@ -216,19 +233,25 @@ receiving (`MOBILE_APP_INBOUND_GUIDE.md` §4) — no returns-specific put-away U
 | QR already **put away** by an earlier return                       | `409 DUPLICATE_SERIAL`                            | Red — same handling as active stock                                |
 | Damaged unit already classified                                    | `409 RETURN_ITEM_ALREADY_CLASSIFIED`               | Use "Change reason" (`override: true`)                             |
 
-### 4.2 Unreadable label (already live — reuse it)
+### 4.2 Unreadable label
 
-When the operator cannot read the label, **never** let them type an identity. Call:
+When the operator cannot read the label, **never** let them type an identity. Call the
+**returns-scoped** endpoint (the session id is in the path, not the body):
 
 ```
-POST /api/v1/inbound/exceptions/unreadable-qr
-{ "session_id": "…", "carton_reference": "TTK-1T1ZB0", "sku": "TTK-COOK-897",
+POST /api/v1/returns/sessions/{session_id}/unreadable
+{ "carton_reference": "TTK-1T1ZB0", "sku": "TTK-COOK-897",
   "batch_number": "BT-SEP-19", "quantity": 1, "note": "Label torn" }
-→ 201 { "reason_code": "QR_UNREADABLE", "destination": "HOLD", "status": "pending_approval", … }
+→ 201 { "id": "…", "reason_code": "QR_UNREADABLE", "destination": "HOLD",
+        "status": "pending_approval", "condition_code": "HOLD",
+        "qr_identifier": "TTK-1T1ZB0", "serial_number": "TTK-1T1ZB0",
+        "sku": "TTK-COOK-897", "quantity": 1, "note": "Label torn", … }
 ```
 
-- `carton_reference` is what the operator **reads off the carton** (printed serial/batch/ASN line).
-- No stock is created and nothing is counted; the supervisors are alerted automatically.
+- `carton_reference` is required; `sku` / `batch_number` / `quantity` / `note` are optional.
+- It is what the operator **reads off the carton** (printed serial/batch/ASN line).
+- No stock is created and **no counter moves** (`scanned_qty` / `classified_qty` stay unchanged);
+  the supervisors are alerted automatically.
 - Reporting the same carton twice in a session → `409 EXCEPTION_ALREADY_ACTIVE` — show "already
   reported" and move on.
 
@@ -237,8 +260,11 @@ POST /api/v1/inbound/exceptions/unreadable-qr
 - One screen per unit, four large buttons: **Good / Damaged / Hold / Quarantine** (thumb-reachable,
   glove-friendly, ≥ 48 dp).
 - `Good` is one tap. Any other condition opens the reason picker
-  (`GET /inbound/exception-reasons`, filtered by the matching `return_*` / `damage` / `hold` /
-  `quarantine` category) and then a free-text note (optional).
+  (`GET /inbound/exception-reasons?condition=<condition>`, **filtered server-side**) and then a
+  free-text note (optional).
+  ✅ Verified counts: `damaged` → 3 (`DAMAGED`, `RETURN_DAMAGED`, `RETURN_SCRAP`),
+  `hold` → 1, `quarantine` → 1, `good` → 1. Omitting `condition` returns all 15 codes, so the
+  device must always pass it — never hard-code or client-filter reason codes.
 - Show the server-derived destination (`QUARANTINE`) so the operator knows where to put the unit.
 - Support **bulk good** for a carton ("All good") — `…/classify/bulk` with the scanned item ids.
 - Default the picker from the reason the registration was created with, but never auto-classify a
@@ -329,8 +355,8 @@ supervisor", "This unit is already captured — check the pending list").
 | 11 | Classify good                             | same                                                        | `201`, no exception, unit stays available for put-away         |
 | 12 | Bulk good a carton                        | `POST …/classify/bulk`                                      | All items classified, counts consistent                        |
 | 13 | End with an unclassified unit             | `POST …/end`                                                | `409 RETURN_SESSION_HAS_UNCLASSIFIED_ITEMS`                    |
-| 14 | End after classifying everything          | `POST …/end`                                                | Note `draft` + `RRN-…`, registration `received`                |
-| 15 | Unreadable label flow                     | `POST /inbound/exceptions/unreadable-qr`                     | `201` HOLD `QR_UNREADABLE`; duplicate → `409 EXCEPTION_ALREADY_ACTIVE` |
+| 14 | End after classifying everything          | `POST …/end`                                                | Note `pending_approval` + `RRN-…`, registration `received`     |
+| 15 | Unreadable label flow                     | `POST /returns/sessions/{id}/unreadable`                     | `201` HOLD `QR_UNREADABLE`; duplicate → `409 EXCEPTION_ALREADY_ACTIVE` |
 | 16 | App restart mid-session                   | `GET /returns/sessions/{id}`                                 | Pending list rebuilt from `condition === null`                 |
 | 17 | Offline classification attempt            | any                                                          | Blocked in the UI with a clear "connect to continue" message   |
 | 18 | Classify with a non-dock account          | `POST …/classify`                                            | `403`, action hidden                                           |

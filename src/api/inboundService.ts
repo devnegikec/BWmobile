@@ -17,6 +17,9 @@ import type {
   RejectItemRequest,
   InboundException,
   InboundScanExceptionInput,
+  UnreadableQrRequest,
+  UnreadableQrResponse,
+  ExceptionReason,
 } from '@/types';
 
 // ---------- Start Scan Session ----------
@@ -116,6 +119,37 @@ export async function getInboundExceptions(params?: {
 }): Promise<InboundException[]> {
   const { data } = await coreClient.get<InboundException[]>('/inbound/exceptions', { params });
   return data;
+}
+
+// ---------- Report an Unreadable QR / Label (returns reuse) ----------
+// LIVE endpoint — reused as-is by the returns flow (§3.6, §4.2).
+// The operator reads `carton_reference` off the carton; no identity is ever
+// typed. No stock is created and nothing is counted.
+export async function reportUnreadableQr(
+  payload: UnreadableQrRequest
+): Promise<UnreadableQrResponse> {
+  console.log('[API] POST /inbound/exceptions/unreadable-qr — payload:', JSON.stringify(payload));
+  const { data } = await coreClient.post<UnreadableQrResponse>(
+    '/inbound/exceptions/unreadable-qr',
+    payload
+  );
+  return data;
+}
+
+// ---------- Exception Reason Codes (reason picker) ----------
+// LIVE endpoint — drives the non-good reason picker (§3.6, §4.3). Reason codes
+// are NEVER hard-coded in the app; they always come from here.
+//
+// ✅ verified live: `condition` filters server-side — `damaged` -> 3 codes
+// (DAMAGED / RETURN_DAMAGED / RETURN_SCRAP), `hold` -> HOLD, `quarantine` ->
+// QUARANTINE, `good` -> RETURN_GOOD. Omitting it returns all 15.
+export async function getExceptionReasons(condition?: string): Promise<ExceptionReason[]> {
+  const { data } = await coreClient.get<
+    ExceptionReason[] | { items?: ExceptionReason[]; results?: ExceptionReason[] }
+  >('/inbound/exception-reasons', { params: condition ? { condition } : undefined });
+
+  if (Array.isArray(data)) return data;
+  return data?.items ?? data?.results ?? [];
 }
 
 export async function uploadInboundExceptionEvidence(

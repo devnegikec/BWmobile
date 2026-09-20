@@ -18,7 +18,10 @@ import AssignBinScreen from '@/screens/AssignBinScreen';
 import ReceivingSlipsScreen from '@/screens/ReceivingSlipsScreen';
 import InboundExceptionsScreen from '@/screens/InboundExceptionsScreen';
 import QsealCascadeScreen from '@/screens/QsealCascadeScreen';
+import ReturnsScreen from '@/screens/ReturnsScreen';
+import ReturnReceiveScreen from '@/screens/ReturnReceiveScreen';
 import { useAuthStore } from '@/store/authStore';
+import { useReturnPermissions } from '@/utils/permissions';
 
 // ---------- Type Definitions ----------
 export type AuthStackParamList = {
@@ -34,11 +37,13 @@ export type AppTabsParamList = {
   Pick: undefined;
   ReceivingSlips: undefined;
   InboundExceptions: undefined;
+  Returns: undefined;
 };
 
 export type RootStackParamList = {
   AppTabs: undefined;
   QsealCascade: undefined;
+  ReturnReceive: undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -64,6 +69,9 @@ function AuthNavigator() {
 // ---------- App Tabs (Logged in) ----------
 function AppTabs() {
   const insets = useSafeAreaInsets();
+  // §6 — the whole Returns area is hidden without `return.read`; there is no
+  // dead route to reach via a deep link because the screen is never registered.
+  const { canRead } = useReturnPermissions();
 
   return (
     <Tab.Navigator
@@ -155,6 +163,18 @@ function AppTabs() {
           ),
         }}
       />
+      {canRead && (
+        <Tab.Screen
+          name="Returns"
+          component={ReturnsScreen}
+          options={{
+            tabBarLabel: 'Returns',
+            tabBarIcon: ({ color }) => (
+              <TabIcon label="↩️" color={color} />
+            ),
+          }}
+        />
+      )}
     </Tab.Navigator>
   );
 }
@@ -180,6 +200,7 @@ export default function AppNavigator() {
           >
             <RootStack.Screen name="AppTabs" component={AppTabs} />
             <RootStack.Screen name="QsealCascade" component={QsealCascadeScreen} />
+            <RootStack.Screen name="ReturnReceive" component={ReturnReceiveScreen} />
           </RootStack.Navigator>
         ) : (
           <AuthNavigator />

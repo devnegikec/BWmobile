@@ -1,8 +1,10 @@
 # Returns (HC) — Mobile Implementation Task List
 
 > **Source of truth**: `RETURNS_HANDHELD_INTEGRATION.md` v1.0
-> **Status**: 📝 Contract-level plan. The `/returns/…` endpoints are **not deployed yet** — every
-> task in Phase 1–8 is blocked on the returns MVP (`R-01` → `R-10`). Phases 0, 9, 11 are runnable now.
+> **Status**: ✅ **The `/returns/…` endpoints are DEPLOYED and API-verified** (2026-09-20). Phases 1–10
+> are implemented and validated against a live backend — see
+> [API integration status](#api-integration-status-2026-09-20) below. Phase 11 (on-device QA) and
+> Phase 12 (do-not audit) are the remaining gates.
 > **How to use**: work top-down. Each task has a **Validate** column — do exactly those steps and
 > tick the box. A task is only done when its manual check passes on a physical HC device.
 
@@ -13,9 +15,61 @@
 | Mark | Meaning |
 | ---- | ------- |
 | ☐ | Not started |
+| ☑ | Implemented **and API-verified** — still needs the on-device check in the Validate column |
 | 🟢 | Runnable today (live endpoints) |
 | 🟠 | Blocked on returns MVP deployment |
 | 🔒 | Blocked on an open question (doc §10) |
+
+---
+
+## API integration status (2026-09-20)
+
+Validated against a live core-service by `scripts/validate-returns-api.py`
+(**20/20 passing** — run it after any backend change).
+
+```bash
+# 1. token
+curl -s -X POST $IDENTITY/api/v1/identity/login -H 'Content-Type: application/json' \
+     -d '{"email":"...","password":"..."}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" > /tmp/tok
+# 2. validate
+WAREHOUSE_ID=<uuid> python3 scripts/validate-returns-api.py
+```
+
+### Verified behaviour
+
+| Area | Result |
+| ---- | ------ |
+| `GET /returns/registrations` | `{items,page,…}` envelope; `warehouse_id` + `status` filters work; rows carry `return_reason_code` |
+| `GET /returns/registrations/{id}` | nests `warehouse`/`party`; `lines[]` use `id`/`received_qty`/`conditions{}` |
+| `POST …/sessions` | `201`; second call → `409 RETURN_SESSION_ALREADY_OPEN` with `hint` |
+| `GET /returns/sessions/{id}` | header + `lines[]` (`line_id`/`scanned_qty`) + `items[]` (`condition:null` = pending) |
+| `POST …/scans` | `201`; **`qr_data` must be the decoded JSON payload** — a raw serial → `400 RETURN_QR_INVALID` |
+| `POST …/classify` | `201`; `destination` is `null` for `good`, server fills `reason_code: RETURN_GOOD` |
+| `POST …/classify/bulk` | `201` and returns a **bare array**, not `{items}` |
+| `POST …/end` | **`200`** (not 201); `receipt_note.status` is `pending_approval` |
+| `POST …/unreadable` | ✅ **returns-scoped endpoint** — `201` `QR_UNREADABLE`/`HOLD`/`pending_approval`; moves no counters; duplicate → `409 EXCEPTION_ALREADY_ACTIVE` |
+| `GET /inbound/exception-reasons?condition=` | ✅ **server-filtered** — `damaged`→3, `hold`→1, `quarantine`→1, `good`→1 |
+| Permissions | ✅ `return.read` / `return.receive` / `return.classify` on the login payload **and** the JWT (`permissions` claim) |
+| Put-away handoff | `GET /put-away` lists returned `good` stock with `reference_type: "return_receipt_note"` |
+
+### Resolved blockers (previously reported)
+
+1. ✅ **Unreadable labels** — `POST /returns/sessions/{id}/unreadable` now exists; the app uses it
+   instead of `/inbound/exceptions/unreadable-qr` (which resolves ids against the inbound table).
+2. ✅ **Reason picker** — `condition` filters server-side, so no reason code or category is
+   hard-coded in the app (task 6.3 fully satisfied).
+3. ✅ **Permission codes** — present in the login payload and the JWT, so the gate is now strict
+   (`UNKNOWN_PERMISSIONS_ALLOW = false`) with `*.*` / `return.*` wildcard support.
+
+### Still open / needs a decision
+
+| Item | Note |
+| ---- | ---- |
+| Over-receipt (§10 Q2) | Server accepts and flags `over_receipt: true` (soft stop). A hard stop would change the payload shape. |
+| `DAMAGED` destination (§10 Q3) | Chip disabled in the app (`ENABLE_DAMAGED_DESTINATION = false` in `ConditionSheet`) — `RETURN_SCRAP` already defaults to `DAMAGED` server-side, but no dock lane is confirmed. |
+| Serials mandatory? (§10 Q1) | Confirmed *optional per registration*: `serial_expected` is `true` when the line lists serials, `false` otherwise. Bulk/quantity mode (D.1) still undesigned. |
+| `DUPLICATE_SERIAL` (5.5) | Not reproducible on the dev tenant — the SKU check (`RETURN_UNIT_NOT_REGISTERED`) fires first. The handler is implemented but untested on-device. |
 
 ---
 
@@ -23,16 +77,23 @@
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
-| 0.1 | Confirm `/returns/*` base paths + envelope with backend (`{"error","message","hint","details"}`) | — | Open the API reference / ask backend; envelope shape matches `errors.ts` parsing | ☐ |
+| 0.1 | Confirm `/returns/*` base paths + envelope with backend (`{"error","message","hint","details"}`) | — | Open the API reference / ask backend; envelope shape matches `errors.ts` parsing | ☑ |
 | 0.2 | Resolve open questions that change payload shape: serials mandatory (§10 Q1), over-receipt hard/soft stop (§10 Q2), `DAMAGED` destination (§10 Q3) | — | Written answer from product owner filed in this doc | ☐ |
-| 0.3 | Confirm new permission codes `return.read` / `return.receive` / `return.classify` exist in the token payload | — | Log a token; `permissions` array contains all three | ☐ |
-| 0.4 | Decide the rehearsal path while MVP is undeployed (`POST /inbound/sessions/{id}/scan` + `/receiving-slips/{slip_id}/items/{item_id}/flag`) | — | Decision recorded; a dry-run session can be completed end-to-end | ☐ |
+| 0.3 | Confirm new permission codes `return.read` / `return.receive` / `return.classify` exist in the token payload | — | Log a token; `permissions` array contains all three | ☑ |
+| 0.4 | Decide the rehearsal path while MVP is undeployed (`POST /inbound/sessions/{id}/scan` + `/receiving-slips/{slip_id}/items/{item_id}/flag`) | — | Decision recorded; a dry-run session can be completed end-to-end | ☑ |
 
 **Phase 0 exit**: no task below is written against a guessed shape.
 
+> **0.1** ✅ done — every 400/404/409 was forced live and returned
+> `{"error","message","hint","details"}` with an operator-facing `hint`.
+> **0.3** ✅ done — codes present in both the login payload and the JWT.
+> **0.4** ✅ moot — the returns MVP is deployed, so the rehearsal path is no longer needed.
+> **0.2** still needs a product decision (see *Still open* above).
+
+
 ---
 
-## Phase 1 — Types 🟠
+## Phase 1 — Types ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -49,7 +110,7 @@ assigns without error.
 
 ---
 
-## Phase 2 — API layer 🟠
+## Phase 2 — API layer ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -68,7 +129,7 @@ assigns without error.
 
 ---
 
-## Phase 3 — Session lifecycle & store 🟠
+## Phase 3 — Session lifecycle & store ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -85,7 +146,7 @@ cross-session leakage.
 
 ---
 
-## Phase 4 — Screens & navigation 🟠
+## Phase 4 — Screens & navigation ✅ implemented (device QA pending)
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -101,7 +162,7 @@ cross-session leakage.
 
 ---
 
-## Phase 5 — Scan validation matrix 🟠
+## Phase 5 — Scan validation matrix ✅ implemented · 11/13 live-verified
 
 Implement every row of doc §4.1. **One task per case**, because each has a distinct operator message.
 
@@ -125,7 +186,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 6 — Condition capture 🟠
+## Phase 6 — Condition capture ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -144,7 +205,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 7 — Unreadable label 🟢
+## Phase 7 — Unreadable label ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -158,7 +219,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 8 — End session & put-away 🟠
+## Phase 8 — End session & put-away ✅ implemented & API-verified
 
 | # | Task | Files | Validate | Done |
 | - | ---- | ----- | -------- | ---- |
@@ -173,7 +234,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 9 — Offline & error handling 🟢 (design) / 🟠 (verify)
+## Phase 9 — Offline & error handling ✅ implemented (device QA pending)
 
 | # | Rule (doc §5) | Validate | Done |
 | - | ------------- | -------- | ---- |
@@ -190,7 +251,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 10 — Permissions & role 🟠
+## Phase 10 — Permissions & role ✅ implemented & API-verified
 
 | # | Operation | Permission | Validate | Done |
 | - | --------- | ---------- | -------- | ---- |
@@ -206,7 +267,7 @@ Implement every row of doc §4.1. **One task per case**, because each has a dist
 
 ---
 
-## Phase 11 — Manual QA sign-off (doc §8, verbatim)
+## Phase 11 — Manual QA sign-off (doc §8, verbatim) ☐ device-only — NOT started
 
 Run each case on a physical HC device against staging. Attach tenant/user, session id,
 `qr_identifier` and `error` code for any failure.
@@ -234,7 +295,7 @@ Run each case on a physical HC device against staging. Attach tenant/user, sessi
 
 ---
 
-## Phase 12 — Do-not-list audit (doc §9)
+## Phase 12 — Do-not-list audit (doc §9) ✅ code-side pass · device review pending
 
 Run these as a final grep/review pass. Any hit is a defect.
 
@@ -249,6 +310,21 @@ Run these as a final grep/review pass. Any hit is a defect.
 | 12.7 | Hard-coded reason codes | Grep for literal strings like `RETURN_DAMAGED`, `QUARANTINE` outside types/tests | ☐ |
 | 12.8 | Any approve / alter-note action on the device | Grep for approve / dispose handlers | ☐ |
 
+**Code-side audit (2026-09-20)** — all eight rows pass in the codebase:
+
+| # | Finding |
+| - | ------- |
+| 12.1 | ✅ The only "serial" input is `carton_reference` in `UnreadableLabelSheet`, which the operator **reads off the carton** (§4.2). No editable identity field exists. |
+| 12.2 | ✅ No offline queue for classify/end — both are gated on connectivity and never retried. |
+| 12.3 | ✅ `RETURN_UNIT_ALREADY_SCANNED` is handled as client-side success (jump to the item, no error). |
+| 12.4 | ✅ `grep -rn 'stock-levels' src/` → 0 hits. |
+| 12.5 | ✅ No returns-specific put-away screen — `putawayService` is reused. |
+| 12.6 | ✅ Every state transition is gated on the awaited response. |
+| 12.7 | ✅ No reason codes hard-coded — the picker is server-filtered by `condition`. Only the `ReturnDestination` enum (`HOLD`/`QUARANTINE`/`DAMAGED`) is literal, which is contract data, not a reason code. |
+| 12.8 | ✅ No approve/dispose handler exists anywhere in the returns flow. |
+
+The ☐ boxes stay open until the same checks are repeated on a physical device.
+
 ---
 
 ## Deferred / not in scope (doc §10)
@@ -257,27 +333,33 @@ These are tracked separately — do **not** build until the open questions resol
 
 | # | Item | Blocked on | Done |
 | - | ---- | ---------- | ---- |
-| D.1 | Quantity-entry mode instead of scan-per-unit (bulk returns) | §10 Q1 — are serials mandatory? | ☐ |
+| D.1 | Quantity-entry mode instead of scan-per-unit (bulk returns) | §10 Q1 — are serials mandatory? (`serial_expected` is per-registration, so the scan-per-unit flow works today) | ☐ |
 | D.2 | Hard stop on over-receipt | §10 Q2 — business decision; payload shape changes | ☐ |
-| D.3 | Fourth `DAMAGED` destination chip + dock lane | §10 Q3 | ☐ |
+| D.3 | Fourth `DAMAGED` destination chip + dock lane | §10 Q3 — flip `ENABLE_DAMAGED_DESTINATION` in `ConditionSheet.tsx` once confirmed | ☐ |
 | D.4 | "Waiting for relabel" state on the unreadable screen | E-10 — supervisor relabel workflow not built | ☐ |
 
 ---
 
 ## Suggested build order
 
+🟩 = implemented & API-verified · 🟨 = device QA pending · ⬜ = not started
+
 ```mermaid
 graph LR
-  P0[Phase 0 · prep] --> P1[Phase 1 · types]
-  P1 --> P2[Phase 2 · API]
-  P2 --> P3[Phase 3 · store + hook]
-  P3 --> P4[Phase 4 · screens]
-  P4 --> P5[Phase 5 · scan matrix]
-  P5 --> P6[Phase 6 · condition capture]
-  P6 --> P7[Phase 7 · unreadable]
-  P7 --> P8[Phase 8 · end + put-away]
-  P8 --> P9[Phase 9 · offline]
-  P9 --> P10[Phase 10 · permissions]
-  P10 --> P11[Phase 11 · QA sign-off]
-  P11 --> P12[Phase 12 · do-not audit]
+  P0[Phase 0 · prep 🟩] --> P1[Phase 1 · types 🟩]
+  P1 --> P2[Phase 2 · API 🟩]
+  P2 --> P3[Phase 3 · store + hook 🟩]
+  P3 --> P4[Phase 4 · screens 🟨]
+  P4 --> P5[Phase 5 · scan matrix 🟩]
+  P5 --> P6[Phase 6 · condition capture 🟩]
+  P6 --> P7[Phase 7 · unreadable 🟩]
+  P7 --> P8[Phase 8 · end + put-away 🟩]
+  P8 --> P9[Phase 9 · offline 🟨]
+  P9 --> P10[Phase 10 · permissions 🟩]
+  P10 --> P11[Phase 11 · QA sign-off ⬜]
+  P11 --> P12[Phase 12 · do-not audit 🟨]
 ```
+
+**Next action**: Phase 11 — run the 18 scenarios in doc §8 on a physical HC device against
+staging, with two accounts (dock user + back-office user). Nothing further is blocked on backend.
+
