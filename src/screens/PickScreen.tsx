@@ -24,6 +24,7 @@ import PickItemsTable from '@/components/pick/PickItemsTable';
 import AssignWorkerModal from '@/components/pick/AssignWorkerModal';
 import { styles } from '@/components/pick/PickScreen.styles';
 import { extractQSealSerial, extractQSealParentSerial } from '@/utils/qsealUrl';
+import { getBackendErrorMessage } from '@/utils/errors';
 import { parseBinQR, lookupBinByQr } from '@/components/putaway/binScanner';
 import type { PickGroup } from '@/components/pick/types';
 import type { PickList, PickListItem, PickListSummary, PickScanResult, Worker } from '@/types';
@@ -72,6 +73,26 @@ function normalizePickList(list: PickList): PickList {
         items = [];
     }
     return { ...list, items };
+}
+
+/**
+ * Convert a pick-scan error into operator-friendly copy. Backend errors carry
+ * an `error` code and `entity_type` that are engineering details — map the
+ * known cases to plain language, and fall back to the shared backend-message
+ * extractor (which also covers network/timeout errors).
+ */
+function friendlyScanError(err: any): string {
+    const data = err?.response?.data;
+    const code = typeof data?.error === 'string' ? data.error : null;
+    const entityType = typeof data?.entity_type === 'string' ? data.entity_type : null;
+
+    if (code === 'NOT_FOUND' && entityType === 'BinStockLevel') {
+        return 'No stock in this bin for the item — check the bin or skip the item.';
+    }
+    if (code === 'NOT_FOUND') {
+        return 'Item not found — it may already be picked or not on this list.';
+    }
+    return getBackendErrorMessage(err) || 'Scan failed. Please try again.';
 }
 
 export default function PickScreen() {
@@ -390,7 +411,7 @@ export default function PickScreen() {
                     let sameSku = 0;
                     let offList = 0;
                     let failed = 0;
-                    const failures: string[] = [];
+                    const failureReasons = new Set<string>();
                     for (const unit of units) {
                         try {
                             const result = await pickService.recordPickScan(
@@ -404,18 +425,14 @@ export default function PickScreen() {
                             else offList += 1;
                         } catch (err: any) {
                             failed += 1;
-                            const data = err?.response?.data;
-                            const detail = data?.detail;
-                            let reason: string;
-                            if (typeof detail === 'string' && detail.trim()) reason = detail;
-                            else if (Array.isArray(detail) && detail.length > 0) reason = detail.map((d: any) => d?.msg || JSON.stringify(d)).join('; ');
-                            else if (detail && typeof detail === 'object') reason = detail.message || detail.error || JSON.stringify(detail);
-                            else if (typeof data === 'string' && data.trim()) reason = data;
-                            else if (data?.message && typeof data.message === 'string') reason = data.message;
-                            else if (data?.error && typeof data.error === 'string') reason = data.error;
-                            else reason = err?.message || 'unknown error';
-                            failures.push(`${unit.serial_number}: ${reason}`);
-                            console.error('[PickScreen] failed unit raw response:', JSON.stringify(data));
+                            failureReasons.add(friendlyScanError(err));
+                            // Raw detail goes to the dev log only — the worker
+                            // sees the friendly summary below.
+                            console.warn(
+                                '[PickScreen] failed unit:',
+                                unit.serial_number,
+                                err?.response?.data ?? err?.message,
+                            );
                         }
                     }
                     await refreshDetail(selectedList.id);
@@ -423,10 +440,9 @@ export default function PickScreen() {
                     const parts = [`📦 ${parent.name || parentSerial}: ${picked} unit(s) picked`];
                     if (sameSku > 0) parts.push(`${sameSku} same-SKU (different box)`);
                     if (offList > 0) parts.push(`${offList} off-list`);
-                    if (failed > 0) parts.push(`${failed} failed`);
-                    if (failures.length > 0) {
-                        console.error('[PickScreen] failed units:', failures);
-                        parts.push(failures[0]);
+                    if (failed > 0) parts.push(`${failed} not picked`);
+                    if (failureReasons.size > 0) {
+                        parts.push(Array.from(failureReasons).join(' · '));
                     }
                     showScanNotice(sameSku > 0 || offList > 0 || failed > 0 ? 'warning' : 'success', parts.join(' · '));
                 }
@@ -437,8 +453,7 @@ export default function PickScreen() {
             await recordSinglePick(qr);
             await refreshDetail(selectedList.id);
         } catch (err: any) {
-            const detail = err?.response?.data?.detail || err?.message || 'Scan failed';
-            showScanNotice('error', `Scan failed: ${detail}`);
+            showScanNotice('error', friendlyScanError(err));
         } finally {
             setSubmitting(false);
             setScanText('');

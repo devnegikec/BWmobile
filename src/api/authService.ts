@@ -1,7 +1,7 @@
 // ============================================================
 // Auth Service — Login, QR Login, Token Refresh, Warehouses
 // ============================================================
-import { identityClient, coreClient, saveTokens, clearTokens } from '@/api/client';
+import { identityClient, coreClient, saveTokens, clearTokens, getRefreshToken } from '@/api/client';
 import type {
   LoginRequest,
   LoginResponse,
@@ -54,7 +54,13 @@ export async function refreshToken(): Promise<string> {
 // ---------- Logout ----------
 export async function logout(): Promise<void> {
   try {
-    await identityClient.post('/identity/logout');
+    // The identity service revokes the refresh token; it must be sent in the
+    // request body (not as a Bearer header). Barcode workers have no refresh
+    // token, so skip the server call entirely in that case.
+    const refreshToken = await getRefreshToken();
+    if (refreshToken) {
+      await identityClient.post('/identity/logout', { refresh_token: refreshToken });
+    }
   } catch {
     // Ignore logout errors — clear local tokens regardless
   }

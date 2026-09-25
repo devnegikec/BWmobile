@@ -9,6 +9,8 @@ import type {
   TrackingItem,
   CompletePutawayRequest,
   CompletePutawayResponse,
+  CompletePutAwayItemsResponse,
+  BulkPutAwayJobResponse,
   PutAwayBinSuggestResponse,
 } from '@/types';
 
@@ -72,6 +74,93 @@ export async function completePutAwayItem(
     binId ? { bin_id: binId } : {}
   );
   return data;
+}
+
+// ---------- Bulk Complete Put-Away Items (Flow A) ----------
+// Small batches complete synchronously in one call (200 + result). Larger
+// batches are queued server-side and polled with exponential backoff.
+
+// Client-side tunables — override via EXPO_PUBLIC_* env vars.
+const BULK_PUTAWAY_POST_TIMEOUT =
+  Number(process.env.EXPO_PUBLIC_BULK_PUTAWAY_POST_TIMEOUT) || 30000;
+const BULK_PUTAWAY_POLL_DEADLINE =
+  Number(process.env.EXPO_PUBLIC_BULK_PUTAWAY_POLL_DEADLINE) || 120000;
+const BULK_PUTAWAY_POLL_INTERVAL =
+  Number(process.env.EXPO_PUBLIC_BULK_PUTAWAY_POLL_INTERVAL) || 1000;
+const BULK_PUTAWAY_POLL_MAX_INTERVAL =
+  Number(process.env.EXPO_PUBLIC_BULK_PUTAWAY_POLL_MAX_INTERVAL) || 8000;
+
+/** Raised when an async bulk job is still queued/processing after the deadline. */
+export class PutAwayStillPendingError extends Error {
+  readonly jobId: string;
+
+  constructor(jobId: string, message = 'Put-away is still processing on the server') {
+    super(message);
+    this.name = 'PutAwayStillPendingError';
+    this.jobId = jobId;
+  }
+}
+
+/**
+ * Extract the completed job's `{ completed, failed, summary }` result. The
+ * backend contract nests it under `result`, but fall back to the top-level
+ * fields in case a completed job is returned flattened.
+ */
+function extractBulkResult(job: BulkPutAwayJobResponse): CompletePutAwayItemsResponse {
+  const source = job.result ?? (job as unknown as CompletePutAwayItemsResponse);
+  return {
+    completed: source.completed ?? [],
+    failed: source.failed ?? [],
+    summary: source.summary ?? {},
+  };
+}
+
+/**
+ * Poll an already-queued bulk put-away job until it completes or fails.
+ * Throws `PutAwayStillPendingError` (carrying `jobId`) when the deadline
+ * elapses so the caller can resume checking without re-submitting.
+ */
+export async function pollBulkPutAwayJob(jobId: string): Promise<CompletePutAwayItemsResponse> {
+  const deadline = Date.now() + BULK_PUTAWAY_POLL_DEADLINE;
+  let delayMs = BULK_PUTAWAY_POLL_INTERVAL;
+  while (Date.now() < deadline) {
+    const { data: job } = await coreClient.get<BulkPutAwayJobResponse>(
+      `/put-away/bulk-jobs/${jobId}`
+    );
+    if (job.status === 'completed') {
+      return extractBulkResult(job);
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error ?? 'Bulk put-away failed');
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(delayMs * 2, BULK_PUTAWAY_POLL_MAX_INTERVAL);
+  }
+  throw new PutAwayStillPendingError(jobId);
+}
+
+export async function completePutAwayItems(
+  listId: string,
+  binId: string,
+  itemIds: string[]
+): Promise<CompletePutAwayItemsResponse> {
+  const { data } = await coreClient.post<
+    CompletePutAwayItemsResponse | { job_id: string; status: string }
+  >(
+    `/put-away/${listId}/complete`,
+    { bin_id: binId, item_ids: itemIds },
+    // Synchronous completion runs inline, so allow more headroom than the
+    // 15s default; async enqueue returns in milliseconds regardless.
+    { timeout: BULK_PUTAWAY_POST_TIMEOUT }
+  );
+
+  // Synchronous response carries the result directly — no polling needed.
+  if (!('job_id' in data) || !data.job_id) {
+    return data as CompletePutAwayItemsResponse;
+  }
+
+  // Async job: poll with exponential backoff.
+  return pollBulkPutAwayJob(data.job_id);
 }
 
 // ---------- Skip a Put-Away Item ----------

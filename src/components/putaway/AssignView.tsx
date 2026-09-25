@@ -21,7 +21,7 @@ interface Props {
   isAssigning: boolean;
   doneCount: number;
   pendingCount: number;
-  onAssignAll: (locationId: string, binLabel: string) => void;
+  onAssignAll: (locationId: string, binLabel: string) => void | Promise<void>;
   onScanQSeal?: (data: string) => void;
   onBack: () => void;
   onComplete?: () => void;
@@ -79,13 +79,19 @@ export default function AssignView({
   }, [binCode, resolveBin]);
 
   // ── Assign all ──
-  const handleAssignAll = useCallback(() => {
+  const handleAssignAll = useCallback(async () => {
     if (!resolvedBin?.location_id) {
       Alert.alert('No Bin', 'Scan or enter a bin code first.');
       return;
     }
-    onAssignAll(resolvedBin.location_id, resolvedBin.full_path || resolvedBin.location_code || resolvedBin.qr_code);
-    setResolvedBin(null);
+    const bin = resolvedBin;
+    try {
+      await onAssignAll(bin.location_id, bin.full_path || bin.location_code || bin.qr_code);
+    } finally {
+      // Clear the bin only after the assign request settles, so the Assign All
+      // button (and its spinner) stays visible while the request is in flight.
+      setResolvedBin(null);
+    }
   }, [resolvedBin, onAssignAll]);
 
   return (

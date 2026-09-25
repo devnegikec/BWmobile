@@ -167,7 +167,8 @@ const LOGIN_ENDPOINTS = [
 ];
 
 // Endpoints that do not require an Authorization header.
-const PUBLIC_ENDPOINTS = [...LOGIN_ENDPOINTS, '/identity/refresh'];
+// Logout authenticates via the refresh_token in the request body, not Bearer.
+const PUBLIC_ENDPOINTS = [...LOGIN_ENDPOINTS, '/identity/refresh', '/identity/logout'];
 
 function isLoginRequest(url?: string): boolean {
   return !!url && LOGIN_ENDPOINTS.some((endpoint) => url.includes(endpoint));
@@ -277,8 +278,7 @@ async function handle401(error: AxiosError) {
 function responseErrorHandler(error: AxiosError) {
   if (__DEV__) {
     console.warn(
-      `[api] ${error.config?.method?.toUpperCase() ?? 'GET'} ${
-        error.config?.url ?? ''
+      `[api] ${error.config?.method?.toUpperCase() ?? 'GET'} ${error.config?.url ?? ''
       } failed`,
       {
         status: error.response?.status,
