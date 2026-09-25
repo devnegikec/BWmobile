@@ -23,16 +23,40 @@
  * Returns `''` when nothing is available so callers can supply their
  * own default via `|| 'default message'`.
  */
+/**
+ * Collapse decimal noise in backend messages (e.g. capacity math rendered as
+ * `1000000.000000000000`) to a plain integer so operators see clean copy. Only
+ * a decimal point followed by two-or-more zeros and then a non-digit is removed,
+ * so values like `0.0001` and dotted identifiers (`1.0`, `192.0.0.1`) are left
+ * untouched.
+ */
+function tidyBackendMessage(message: string): string {
+  if (!message) return message;
+  return message.replace(/\.00+(?=\D|$)/g, '');
+}
+
 export function getBackendErrorMessage(err: any): string {
   const data = err?.response?.data;
   const detail = data?.detail;
 
-  if (typeof detail === 'string' && detail.trim()) return detail;
+  // Network-level failure — no HTTP response was received (backend down,
+  // connection reset, or a request timeout). Surface actionable copy instead
+  // of Axios's raw "Network Error" / "timeout of … exceeded" text.
+  if (err?.isAxiosError && !err?.response) {
+    if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')) {
+      return 'Request timed out. Please try again.';
+    }
+    return 'Cannot reach the server. Check your connection and try again.';
+  }
 
-  // FastAPI's default validation responses return `detail` as an array of
-  // { loc, msg, type } entries. Surface each entry's human-readable `msg`
-  // instead of JSON.stringify-ing the raw array.
-  if (Array.isArray(detail)) {
+  let message = '';
+
+  if (typeof detail === 'string' && detail.trim()) {
+    message = detail;
+  } else if (Array.isArray(detail)) {
+    // FastAPI's default validation responses return `detail` as an array of
+    // { loc, msg, type } entries. Surface each entry's human-readable `msg`
+    // instead of JSON.stringify-ing the raw array.
     const messages = detail
       .map((entry: any) => {
         if (!entry || typeof entry !== 'object') return '';
@@ -41,18 +65,36 @@ export function getBackendErrorMessage(err: any): string {
         return '';
       })
       .filter((m: string) => m.trim());
-    if (messages.length > 0) return messages.join('; ');
-    return JSON.stringify(detail);
+    message = messages.length > 0 ? messages.join('; ') : JSON.stringify(detail);
+  } else if (detail && typeof detail === 'object') {
+    message = detail.message || detail.error || JSON.stringify(detail);
+  } else if (data && typeof data.message === 'string' && data.message.trim()) {
+    message = data.message;
+  } else if (typeof err?.message === 'string' && err.message.trim()) {
+    message = err.message;
   }
 
-  if (detail && typeof detail === 'object') {
-    return detail.message || detail.error || JSON.stringify(detail);
+  return tidyBackendMessage(message.trim());
+}
+
+/**
+ * Extract the distinct, human-readable error messages from a
+ * `Promise.allSettled` result set. Rejected entries contribute their backend
+ * message (deduplicated) so bulk "assign all" flows can tell the operator
+ * exactly what went wrong instead of silently counting failures.
+ */
+export function collectSettledErrors(results: PromiseSettledResult<unknown>[]): string[] {
+  const messages: string[] = [];
+  const seen = new Set<string>();
+  for (const result of results) {
+    if (result.status !== 'rejected') continue;
+    const message = getBackendErrorMessage(result.reason) || 'Something went wrong. Please try again.';
+    if (!seen.has(message)) {
+      seen.add(message);
+      messages.push(message);
+    }
   }
-  if (data && typeof data.message === 'string' && data.message.trim()) {
-    return data.message;
-  }
-  if (typeof err?.message === 'string' && err.message.trim()) return err.message;
-  return '';
+  return messages;
 }
 
 /**

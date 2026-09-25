@@ -129,6 +129,50 @@ export interface CompletePutawayResponse {
   completed_at: string;
 }
 
+// ---------- Bulk Put-Away (slip/list based — Flow A) ----------
+export interface CompletePutAwayItemsRequest {
+  bin_id?: string;
+  item_ids: string[];
+}
+
+export interface CompletePutAwayItemResult {
+  id?: string;
+  item_id?: string;
+  sku?: string;
+  batch_number?: string;
+  quantity?: number;
+  bin_location_id?: string;
+  bin_location_code?: string;
+  status?: string;
+  completed_at?: string;
+}
+
+export interface CompletePutAwayFailedItem {
+  id?: string;
+  item_id?: string;
+  error?: string;
+  message?: string;
+  detail?: string;
+}
+
+export interface CompletePutAwayItemsResponse {
+  completed?: CompletePutAwayItemResult[];
+  failed?: CompletePutAwayFailedItem[];
+  summary?: { completed_count?: number; failed_count?: number };
+}
+
+// ---------- Bulk Put-Away Async Job (polling) ----------
+export interface BulkPutAwayJobResponse {
+  job_id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  job_type?: string;
+  put_away_list_id?: string | null;
+  progress?: { total: number; completed: number; failed: number } | null;
+  result?: CompletePutAwayItemsResponse | null;
+  error?: string | null;
+  completed_at?: string | null;
+}
+
 // ---------- FIFO Bin Suggestions (Workflow B) ----------
 export interface FifoBinSuggestion {
   bin_id: string;

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import * as putawayService from '@/api/putawayService';
+import { getBackendErrorMessage } from '@/utils/errors';
 import AssignView from '@/components/putaway/AssignView';
 import PutawayHeader from '@/components/putaway/PutawayHeader';
 import PutAwayListCard from '@/components/putaway/PutAwayListCard';
@@ -307,6 +308,44 @@ export default function PutawayScreen() {
     });
   };
 
+  // ---------- Resume a still-pending bulk put-away job ----------
+  const resumeBulkAssignment = async (jobId: string, binLabel: string) => {
+    setAssigningAll(true);
+    try {
+      const res = await putawayService.pollBulkPutAwayJob(jobId);
+      const completedIds = (res.completed ?? [])
+        .map((c) => c.id ?? c.item_id)
+        .filter((id): id is string => Boolean(id));
+      markItemsCompleted(completedIds, binLabel);
+      if (selectedList) await refreshDetail(selectedList.id);
+      const failed = res.failed ?? [];
+      if (failed.length > 0) {
+        const messages = failed
+          .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
+          .filter((m) => m);
+        Alert.alert('Some items were not assigned', messages.join('\n'));
+      }
+    } catch (err: any) {
+      if (err instanceof putawayService.PutAwayStillPendingError) {
+        Alert.alert(
+          'Still processing',
+          'The bulk operation is still running on the server. It will finish in the background.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Keep checking',
+              onPress: () => void resumeBulkAssignment(err.jobId, binLabel),
+            },
+          ]
+        );
+        return;
+      }
+      Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
+    } finally {
+      setAssigningAll(false);
+    }
+  };
+
   // ---------- Assign a single item ----------
   const handleAssignItem = async (item: PutAwayItem, bin: BinInfo) => {
     if (!selectedList) return;
@@ -320,7 +359,7 @@ export default function PutawayScreen() {
         status === 409 ? 'Already Completed' : 'Error',
         status === 409
           ? 'This item was already put away. Refreshing…'
-          : err.response?.data?.detail || 'Failed to complete.'
+          : getBackendErrorMessage(err) || 'Failed to complete.'
       );
     } finally {
       setCompletingId(null);
@@ -336,16 +375,46 @@ export default function PutawayScreen() {
     const pending = group.children.filter((c) => c.status === 'pending');
     if (pending.length === 0) return;
     setAssigningAll(true);
-    const results = await Promise.allSettled(
-      pending.map((item) =>
-        putawayService.completePutAwayItem(selectedList.id, item.id, bin.location_id)
-      )
-    );
-    const completedIds = pending
-      .filter((_, i) => results[i].status === 'fulfilled')
-      .map((item) => item.id);
-    setAssigningAll(false);
-    markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
+    try {
+      const res = await putawayService.completePutAwayItems(
+        selectedList.id,
+        bin.location_id,
+        pending.map((item) => item.id)
+      );
+      const completedIds = (res.completed ?? [])
+        .map((c) => c.id ?? c.item_id)
+        .filter((id): id is string => Boolean(id));
+      markItemsCompleted(completedIds, bin.full_path || bin.location_code || bin.qr_code);
+      const failed = res.failed ?? [];
+      if (failed.length > 0) {
+        const messages = failed
+          .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
+          .filter((m) => m);
+        Alert.alert('Some items were not assigned', messages.join('\n'));
+      }
+    } catch (err: any) {
+      if (err instanceof putawayService.PutAwayStillPendingError) {
+        Alert.alert(
+          'Still processing',
+          'The bulk operation is still running on the server. It will finish in the background.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Keep checking',
+              onPress: () =>
+                void resumeBulkAssignment(
+                  err.jobId,
+                  bin.full_path || bin.location_code || bin.qr_code
+                ),
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
+      }
+    } finally {
+      setAssigningAll(false);
+    }
     await refreshDetail(selectedList.id);
   };
 
@@ -358,20 +427,49 @@ export default function PutawayScreen() {
       return;
     }
     setAssigningAll(true);
-    const results = await Promise.allSettled(
-      pending.map((item) =>
-        putawayService.completePutAwayItem(selectedList.id, item.id, locationId)
-      )
-    );
-    const completedIds = pending
-      .filter((_, i) => results[i].status === 'fulfilled')
-      .map((item) => item.id);
-    setAssigningAll(false);
-    markItemsCompleted(completedIds, binLabel);
-    // Re-fetch authoritative state so the counts match the server even when
-    // some requests were rejected transiently (mobile/web mismatch bug).
-    await refreshDetail(selectedList.id);
-    Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
+    try {
+      const res = await putawayService.completePutAwayItems(
+        selectedList.id,
+        locationId,
+        pending.map((item) => item.id)
+      );
+      const completedIds = (res.completed ?? [])
+        .map((c) => c.id ?? c.item_id)
+        .filter((id): id is string => Boolean(id));
+      markItemsCompleted(completedIds, binLabel);
+      // Re-fetch authoritative state so the counts match the server.
+      await refreshDetail(selectedList.id);
+      const failed = res.failed ?? [];
+      if (failed.length > 0) {
+        const messages = failed
+          .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
+          .filter((m) => m);
+        Alert.alert(
+          `${completedIds.length}/${pending.length} assigned — some failed`,
+          messages.join('\n')
+        );
+      } else {
+        Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
+      }
+    } catch (err: any) {
+      if (err instanceof putawayService.PutAwayStillPendingError) {
+        Alert.alert(
+          'Still processing',
+          'The bulk operation is still running on the server. It will finish in the background.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Keep checking',
+              onPress: () => void resumeBulkAssignment(err.jobId, binLabel),
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
+      }
+    } finally {
+      setAssigningAll(false);
+    }
   };
 
   // ---------- Toggle group expand ----------

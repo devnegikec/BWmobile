@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 import * as putawayService from '@/api/putawayService';
 import * as qsealService from '@/api/qsealService';
 import { extractSerial, isQSealUrl } from '@/components/putaway/qrHelpers';
+import { getBackendErrorMessage, collectSettledErrors } from '@/utils/errors';
 import type { TrackingItem } from '@/types';
 
 // ── Types ──
@@ -114,8 +115,7 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       setRows((prev) => [...prev, boxRow, ...childRows]);
       setLastFeedback(`📦 "${parent.name || serial}" — ${units.length} item(s)`);
     } catch (err: any) {
-      const d = err?.response?.data?.detail || err?.message || 'Failed';
-      setErrorMsg(typeof d === 'string' ? d : d?.message || 'Failed');
+      setErrorMsg(getBackendErrorMessage(err) || 'Failed');
     } finally { setIsProcessing(false); }
   };
 
@@ -200,7 +200,6 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       '[DirectPutAway] assignRow key=', row.key, 'type=', row.type,
       'status=', row.status, 'bin=', locationId
     );
-    const listId = await ensureDirectList();
 
     if (row.type === 'box') {
       const boxKey = row.key;
@@ -213,27 +212,37 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       if (boxChildren.length === 0) { Alert.alert('Info', 'No pending items in this box.'); return; }
 
       setIsAssigning(true);
-      const results = await Promise.allSettled(
-        boxChildren.map(async (c) => {
-          await putawayService.completePutawayByQr({
-            qr: c.serial, bin_id: locationId, quantity: c.tracking!.quantity,
-            put_away_list_id: listId || undefined,
-          });
-          setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
-        })
-      );
-      const done = results.filter((r) => r.status === 'fulfilled').length;
-      setIsAssigning(false);
-      Alert.alert('Done', `${done}/${boxChildren.length} items assigned.`);
+      try {
+        const listId = await ensureDirectList();
+        const results = await Promise.allSettled(
+          boxChildren.map(async (c) => {
+            await putawayService.completePutawayByQr({
+              qr: c.serial, bin_id: locationId, quantity: c.tracking!.quantity,
+              put_away_list_id: listId || undefined,
+            });
+            setRows((prev) => prev.map((x) => (x.key === c.key ? { ...x, status: 'assigned' as const } : x)));
+          })
+        );
+        const done = results.filter((r) => r.status === 'fulfilled').length;
+        const errors = collectSettledErrors(results);
+        if (errors.length > 0) {
+          Alert.alert(`${done}/${boxChildren.length} assigned — some failed`, errors.join('\n'));
+        } else {
+          Alert.alert('Done', `${done}/${boxChildren.length} items assigned.`);
+        }
+      } finally {
+        setIsAssigning(false);
+      }
     } else {
       if (row.status !== 'pending' || !row.tracking) return;
       try {
+        const listId = await ensureDirectList();
         await putawayService.completePutawayByQr({
           qr: row.serial, bin_id: locationId, quantity: row.tracking.quantity,
           put_away_list_id: listId || undefined,
         });
         setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
-      } catch (err: any) { Alert.alert('Error', err.response?.data?.detail || 'Failed.'); }
+      } catch (err: any) { Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign item.'); }
     }
   };
 
@@ -256,21 +265,28 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
     console.log('[DirectPutAway] assignAll pendingCount=', pending.length);
     if (pending.length === 0) { Alert.alert('Info', 'No pending items.'); return; }
 
-    const listId = await ensureDirectList();
-
     setIsAssigning(true);
-    const results = await Promise.allSettled(
-      pending.map(async (r) => {
-        await putawayService.completePutawayByQr({
-          qr: r.serial, bin_id: locationId, quantity: r.tracking!.quantity,
-          put_away_list_id: listId || undefined,
-        });
-        setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
-      })
-    );
-    const done = results.filter((r) => r.status === 'fulfilled').length;
-    setIsAssigning(false);
-    Alert.alert('Done', `${done}/${pending.length} items assigned.`);
+    try {
+      const listId = await ensureDirectList();
+      const results = await Promise.allSettled(
+        pending.map(async (r) => {
+          await putawayService.completePutawayByQr({
+            qr: r.serial, bin_id: locationId, quantity: r.tracking!.quantity,
+            put_away_list_id: listId || undefined,
+          });
+          setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, status: 'assigned' as const } : x)));
+        })
+      );
+      const done = results.filter((r) => r.status === 'fulfilled').length;
+      const errors = collectSettledErrors(results);
+      if (errors.length > 0) {
+        Alert.alert(`${done}/${pending.length} assigned — some failed`, errors.join('\n'));
+      } else {
+        Alert.alert('Done', `${done}/${pending.length} items assigned.`);
+      }
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   // ── Toggle expand ──

@@ -189,23 +189,49 @@ export function useInboundFlow() {
   // Background: record individual item scans concurrently
   const recordScansInBackground = async (units: any[], generation: number) => {
     const CONCURRENCY = 5;
+    const failures: { serial: string; message: string }[] = [];
     /* eslint-disable no-await-in-loop -- intentional batched concurrency (limit 5 in flight) */
     for (let i = 0; i < units.length; i += CONCURRENCY) {
       // The session was ended/cancelled while a previous batch was in flight.
       // Stop instead of writing more scans against the dead session.
       if (generation !== sessionGeneration.current) return;
       const batch = units.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         batch.map(async (unit) => {
           try {
             await recordScan(unit.serial_number);
-          } catch {}
+          } catch (err: any) {
+            // Re-wrap so the reason carries the serial for the summary alert.
+            throw { serial: unit.serial_number, message: err?.message || 'Scan failed' };
+          }
         })
       );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          const reason = result.reason as { serial: string; message: string };
+          failures.push(reason);
+        }
+      }
       if (generation !== sessionGeneration.current) return;
       await refreshReconciliation();
     }
     /* eslint-enable no-await-in-loop */
+
+    // Session reset while recording — don't alert on an abandoned screen.
+    if (generation !== sessionGeneration.current) return;
+
+    if (failures.length > 0) {
+      // Deduplicate by reason so a box with many rejected units produces one
+      // readable line instead of dozens of identical alerts.
+      const counts = new Map<string, number>();
+      for (const failure of failures) {
+        counts.set(failure.message, (counts.get(failure.message) || 0) + 1);
+      }
+      const lines = Array.from(counts.entries()).map(([message, count]) =>
+        count > 1 ? `${count} item(s): ${message}` : message
+      );
+      Alert.alert('Some items could not be scanned', lines.join('\n'));
+    }
   };
 
   // ---- QSeal parent scan: Step 1→2 (UI visible), Step 3 (background) ----
@@ -448,8 +474,8 @@ export function useInboundFlow() {
                   Alert.alert(
                     'Cancel Failed',
                     err?.response?.data?.message ||
-                      err?.message ||
-                      'Could not cancel the session on the server. Please try again.'
+                    err?.message ||
+                    'Could not cancel the session on the server. Please try again.'
                   );
                   return; // Keep local state so the user can retry.
                 }
