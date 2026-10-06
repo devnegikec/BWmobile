@@ -155,7 +155,7 @@ export default function PutawayScreen() {
   // view shows an in-progress banner and auto-refreshes so the operator always
   // knows what's happening.
   const [backgroundJob, setBackgroundJob] = useState<
-    | { kind: 'poll'; jobId: string; binLabel: string }
+    | { kind: 'poll'; jobId: string; binLabel: string; listId: string }
     | { kind: 'reconcile'; listId: string }
     | null
   >(null);
@@ -273,6 +273,7 @@ export default function PutawayScreen() {
   const handleSelectList = async (list: PutAwayList) => {
     if (isLoading) return;
     setBackgroundJob(null);
+    selectedListIdRef.current = list.id;
     setIsLoading(true);
     try {
       const detail = await putawayService.getPutAwayList(list.id);
@@ -290,6 +291,8 @@ export default function PutawayScreen() {
   const refreshDetail = useCallback(async (listId: string) => {
     try {
       const detail = await putawayService.getPutAwayList(listId);
+      // Discard results from a list the operator has since navigated away from.
+      if (selectedListIdRef.current !== listId) return;
       setSelectedList(normalizePutAwayList(detail));
       void loadSuggestedBins(detail);
     } catch {
@@ -324,15 +327,22 @@ export default function PutawayScreen() {
   };
 
   // ---------- Resume a still-pending bulk put-away job ----------
+  // Tracks the currently selected list id so in-flight polls/refreshes from a
+  // previous list can be discarded instead of overwriting the new selection.
+  const selectedListIdRef = useRef<string | null>(null);
+
   // Single-flight guard so overlapping auto-refresh ticks never pile up
   // duplicate status checks (or duplicate alerts) for the same job.
   const checkingRef = useRef(false);
 
-  const resumeBulkAssignment = async (jobId: string, binLabel: string) => {
+  const resumeBulkAssignment = async (jobId: string, binLabel: string, listId: string) => {
     if (checkingRef.current) return;
     checkingRef.current = true;
     try {
       const res = await putawayService.checkBulkPutAwayJob(jobId);
+      // The operator may have switched lists while this check was in flight —
+      // discard the result instead of refreshing the old list over the new one.
+      if (selectedListIdRef.current !== listId) return;
       const completedIds = (res.completed ?? [])
         .map((c) => c.id ?? c.item_id)
         .filter((id): id is string => Boolean(id));
@@ -364,7 +374,7 @@ export default function PutawayScreen() {
         setBackgroundJob((prev) =>
           prev?.kind === 'poll' && prev.jobId === jobId
             ? prev
-            : { kind: 'poll', jobId, binLabel }
+            : { kind: 'poll', jobId, binLabel, listId }
         );
       } else {
         setBackgroundJob((prev) =>
@@ -383,7 +393,7 @@ export default function PutawayScreen() {
     if (!backgroundJob) return;
     const timer = setInterval(() => {
       if (backgroundJob.kind === 'poll') {
-        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel);
+        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel, backgroundJob.listId);
       } else if (backgroundJob.listId) {
         void refreshDetail(backgroundJob.listId);
       }
@@ -431,10 +441,10 @@ export default function PutawayScreen() {
   // ---------- Assign all pending items in a group ----------
   const handleAssignGroup = async (group: PutAwayGroup, bin: BinInfo) => {
     if (!selectedList) return;
-    if (backgroundJob?.kind === 'poll') {
+    if (backgroundJob) {
       Alert.alert(
         'Still saving',
-        'The previous bin is still saving on the server. Wait for it to finish (or press Stop), then assign to the next bin.'
+        'A previous put-away is still being confirmed. Wait for it to finish (or dismiss the banner), then assign to the next bin.'
       );
       return;
     }
@@ -465,6 +475,7 @@ export default function PutawayScreen() {
           kind: 'poll',
           jobId: err.jobId,
           binLabel: bin.full_path || bin.location_code || bin.qr_code,
+          listId: selectedList.id,
         });
       } else if (err instanceof putawayService.PutAwayNetworkError) {
         setBackgroundJob({ kind: 'reconcile', listId: selectedList.id });
@@ -484,10 +495,10 @@ export default function PutawayScreen() {
   // ---------- Assign all pending items ----------
   const handleAssignAll = async (locationId: string, binLabel: string) => {
     if (!selectedList) return;
-    if (backgroundJob?.kind === 'poll') {
+    if (backgroundJob) {
       Alert.alert(
         'Still saving',
-        'The previous bin is still saving on the server. Wait for it to finish (or press Stop), then assign to the next bin.'
+        'A previous put-away is still being confirmed. Wait for it to finish (or dismiss the banner), then assign to the next bin.'
       );
       return;
     }
@@ -521,7 +532,7 @@ export default function PutawayScreen() {
       }
     } catch (err: any) {
       if (err instanceof putawayService.PutAwayStillPendingError) {
-        setBackgroundJob({ kind: 'poll', jobId: err.jobId, binLabel });
+        setBackgroundJob({ kind: 'poll', jobId: err.jobId, binLabel, listId: selectedList.id });
       } else if (err instanceof putawayService.PutAwayNetworkError) {
         setBackgroundJob({ kind: 'reconcile', listId: selectedList.id });
         Alert.alert(
@@ -625,6 +636,7 @@ export default function PutawayScreen() {
 
   const handleBackToList = () => {
     setBackgroundJob(null);
+    selectedListIdRef.current = null;
     setViewMode('list');
     setSelectedList(null);
     loadLists(); // Refresh
@@ -723,7 +735,7 @@ export default function PutawayScreen() {
                     style={styles.refreshBtn}
                     onPress={() => {
                       if (backgroundJob.kind === 'poll') {
-                        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel);
+                        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel, backgroundJob.listId);
                       } else if (backgroundJob.listId) {
                         void refreshDetail(backgroundJob.listId);
                       }

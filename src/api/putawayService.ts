@@ -140,17 +140,29 @@ function extractBulkResult(job: BulkPutAwayJobResponse): CompletePutAwayItemsRes
  * - `failed`    → throws the backend's error.
  * - queued/processing → throws `PutAwayStillPendingError` (carrying `jobId`) so
  *   the caller can decide to keep waiting or retry later.
- * - network error (no HTTP response) → propagates for the caller to reconcile.
+ * - network error (no HTTP response) → throws `PutAwayNetworkError` so callers
+ *   keep polling instead of treating the server job as lost.
  *
  * This is the lightweight primitive used by background auto-refresh; unlike
  * `pollBulkPutAwayJob` it never blocks on its own retry loop.
  */
 export async function checkBulkPutAwayJob(jobId: string): Promise<CompletePutAwayItemsResponse> {
-  const { data: job } = await coreClient.get<BulkPutAwayJobResponse>(
-    `/put-away/bulk-jobs/${jobId}`,
-    // A single status probe should be fast; don't let it hang the caller.
-    { timeout: BULK_PUTAWAY_POLL_MAX_INTERVAL }
-  );
+  let job: BulkPutAwayJobResponse;
+  try {
+    const { data } = await coreClient.get<BulkPutAwayJobResponse>(
+      `/put-away/bulk-jobs/${jobId}`,
+      // A single status probe should be fast; don't let it hang the caller.
+      { timeout: BULK_PUTAWAY_POLL_MAX_INTERVAL }
+    );
+    job = data;
+  } catch (err: any) {
+    // Normalize network-level failures (timeout / dropped connection) into
+    // PutAwayNetworkError so callers keep polling instead of stopping.
+    if (isNetworkError(err)) {
+      throw new PutAwayNetworkError();
+    }
+    throw err;
+  }
   if (job.status === 'completed') {
     return extractBulkResult(job);
   }
@@ -172,7 +184,7 @@ export async function pollBulkPutAwayJob(jobId: string): Promise<CompletePutAway
     try {
       return await checkBulkPutAwayJob(jobId);
     } catch (err: any) {
-      if (err instanceof PutAwayStillPendingError || isNetworkError(err)) {
+      if (err instanceof PutAwayStillPendingError || err instanceof PutAwayNetworkError) {
         // Still queued/processing, or a transient network error while checking —
         // keep retrying until the deadline instead of losing the job.
         await new Promise((resolve) => setTimeout(resolve, delayMs));
