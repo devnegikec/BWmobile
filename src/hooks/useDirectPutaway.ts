@@ -6,7 +6,12 @@ import { Alert } from 'react-native';
 import * as putawayService from '@/api/putawayService';
 import * as qsealService from '@/api/qsealService';
 import { extractSerial, isQSealUrl } from '@/components/putaway/qrHelpers';
-import { getBackendErrorMessage, collectSettledErrors } from '@/utils/errors';
+import {
+  getBackendErrorMessage,
+  collectSettledErrors,
+  buildPutAwayFailureAlert,
+  formatSinglePutAwayError,
+} from '@/utils/errors';
 import type { TrackingItem } from '@/types';
 
 // ── Types ──
@@ -226,7 +231,8 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
         const done = results.filter((r) => r.status === 'fulfilled').length;
         const errors = collectSettledErrors(results);
         if (errors.length > 0) {
-          Alert.alert(`${done}/${boxChildren.length} assigned — some failed`, errors.join('\n'));
+          const alert = buildPutAwayFailureAlert(errors, done, boxChildren.length);
+          Alert.alert(alert.title, alert.message);
         } else {
           Alert.alert('Done', `${done}/${boxChildren.length} items assigned.`);
         }
@@ -242,7 +248,10 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
           put_away_list_id: listId || undefined,
         });
         setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'assigned' as const } : r)));
-      } catch (err: any) { Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign item.'); }
+      } catch (err: any) {
+        const alert = formatSinglePutAwayError(err);
+        Alert.alert(alert.title, alert.message);
+      }
     }
   };
 
@@ -280,7 +289,8 @@ export function useDirectPutaway(orgId: string, warehouseId: string) {
       const done = results.filter((r) => r.status === 'fulfilled').length;
       const errors = collectSettledErrors(results);
       if (errors.length > 0) {
-        Alert.alert(`${done}/${pending.length} assigned — some failed`, errors.join('\n'));
+        const alert = buildPutAwayFailureAlert(errors, done, pending.length);
+        Alert.alert(alert.title, alert.message);
       } else {
         Alert.alert('Done', `${done}/${pending.length} items assigned.`);
       }

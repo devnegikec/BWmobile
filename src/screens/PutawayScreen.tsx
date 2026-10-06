@@ -13,7 +13,11 @@ import {
 } from 'react-native';
 import { useAuthStore } from '@/store/authStore';
 import * as putawayService from '@/api/putawayService';
-import { getBackendErrorMessage } from '@/utils/errors';
+import {
+  getBackendErrorMessage,
+  buildPutAwayFailureAlert,
+  formatSinglePutAwayError,
+} from '@/utils/errors';
 import AssignView from '@/components/putaway/AssignView';
 import PutawayHeader from '@/components/putaway/PutawayHeader';
 import PutAwayListCard from '@/components/putaway/PutAwayListCard';
@@ -146,6 +150,16 @@ export default function PutawayScreen() {
   const [assigningAll, setAssigningAll] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  // A bulk completion that is still running on the server (async job) or a
+  // network failure whose result must be reconciled. While set, the detail
+  // view shows an in-progress banner and auto-refreshes so the operator always
+  // knows what's happening.
+  const [backgroundJob, setBackgroundJob] = useState<
+    | { kind: 'poll'; jobId: string; binLabel: string; listId: string }
+    | { kind: 'reconcile'; listId: string }
+    | null
+  >(null);
+
   // Skip reason input
   const [skipModalVisible, setSkipModalVisible] = useState(false);
   const [skipTarget, setSkipTarget] = useState<PutAwayItem | null>(null);
@@ -258,6 +272,8 @@ export default function PutawayScreen() {
   // ---------- Load Detail ----------
   const handleSelectList = async (list: PutAwayList) => {
     if (isLoading) return;
+    setBackgroundJob(null);
+    selectedListIdRef.current = list.id;
     setIsLoading(true);
     try {
       const detail = await putawayService.getPutAwayList(list.id);
@@ -275,6 +291,8 @@ export default function PutawayScreen() {
   const refreshDetail = useCallback(async (listId: string) => {
     try {
       const detail = await putawayService.getPutAwayList(listId);
+      // Discard results from a list the operator has since navigated away from.
+      if (selectedListIdRef.current !== listId) return;
       setSelectedList(normalizePutAwayList(detail));
       void loadSuggestedBins(detail);
     } catch {
@@ -309,10 +327,22 @@ export default function PutawayScreen() {
   };
 
   // ---------- Resume a still-pending bulk put-away job ----------
-  const resumeBulkAssignment = async (jobId: string, binLabel: string) => {
-    setAssigningAll(true);
+  // Tracks the currently selected list id so in-flight polls/refreshes from a
+  // previous list can be discarded instead of overwriting the new selection.
+  const selectedListIdRef = useRef<string | null>(null);
+
+  // Single-flight guard so overlapping auto-refresh ticks never pile up
+  // duplicate status checks (or duplicate alerts) for the same job.
+  const checkingRef = useRef(false);
+
+  const resumeBulkAssignment = async (jobId: string, binLabel: string, listId: string) => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
     try {
-      const res = await putawayService.pollBulkPutAwayJob(jobId);
+      const res = await putawayService.checkBulkPutAwayJob(jobId);
+      // The operator may have switched lists while this check was in flight —
+      // discard the result instead of refreshing the old list over the new one.
+      if (selectedListIdRef.current !== listId) return;
       const completedIds = (res.completed ?? [])
         .map((c) => c.id ?? c.item_id)
         .filter((id): id is string => Boolean(id));
@@ -323,28 +353,67 @@ export default function PutawayScreen() {
         const messages = failed
           .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
           .filter((m) => m);
-        Alert.alert('Some items were not assigned', messages.join('\n'));
-      }
-    } catch (err: any) {
-      if (err instanceof putawayService.PutAwayStillPendingError) {
-        Alert.alert(
-          'Still processing',
-          'The bulk operation is still running on the server. It will finish in the background.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Keep checking',
-              onPress: () => void resumeBulkAssignment(err.jobId, binLabel),
-            },
-          ]
+        const alert = buildPutAwayFailureAlert(
+          messages,
+          completedIds.length,
+          completedIds.length + failed.length
         );
-        return;
+        Alert.alert(alert.title, alert.message);
       }
-      Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
+      // Job finished — clear the in-progress banner.
+      setBackgroundJob((prev) =>
+        prev?.kind === 'poll' && prev.jobId === jobId ? null : prev
+      );
+    } catch (err: any) {
+      if (
+        err instanceof putawayService.PutAwayStillPendingError ||
+        err instanceof putawayService.PutAwayNetworkError
+      ) {
+        // Still running (or a transient error while checking) — keep the
+        // in-progress banner and let the auto-refresh timer keep polling.
+        setBackgroundJob((prev) =>
+          prev?.kind === 'poll' && prev.jobId === jobId
+            ? prev
+            : { kind: 'poll', jobId, binLabel, listId }
+        );
+      } else {
+        setBackgroundJob((prev) =>
+          prev?.kind === 'poll' && prev.jobId === jobId ? null : prev
+        );
+        Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
+      }
     } finally {
-      setAssigningAll(false);
+      checkingRef.current = false;
     }
   };
+
+  // Auto-refresh the in-progress bulk job so the operator always sees the
+  // latest status without tapping anything.
+  useEffect(() => {
+    if (!backgroundJob) return;
+    const timer = setInterval(() => {
+      if (backgroundJob.kind === 'poll') {
+        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel, backgroundJob.listId);
+      } else if (backgroundJob.listId) {
+        void refreshDetail(backgroundJob.listId);
+      }
+    }, 6000);
+    return () => clearInterval(timer);
+    // resumeBulkAssignment/refreshDetail read stable ids and setters, so a
+    // single effect bound to `backgroundJob` is sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backgroundJob]);
+
+  // Auto-stop the in-progress banner the moment the put-away list has no
+  // pending items left — even if the background job's status record lags
+  // behind. This keeps the spinner from running forever after completion.
+  useEffect(() => {
+    if (!backgroundJob || !selectedList) return;
+    const counts = computeCounts(selectedList);
+    if (counts.total > 0 && counts.pending === 0) {
+      setBackgroundJob(null);
+    }
+  }, [backgroundJob, selectedList]);
 
   // ---------- Assign a single item ----------
   const handleAssignItem = async (item: PutAwayItem, bin: BinInfo) => {
@@ -355,12 +424,12 @@ export default function PutawayScreen() {
       markItemsCompleted([item.id], bin.full_path || bin.location_code || bin.qr_code);
     } catch (err: any) {
       const status = err.response?.status;
-      Alert.alert(
-        status === 409 ? 'Already Completed' : 'Error',
-        status === 409
-          ? 'This item was already put away. Refreshing…'
-          : getBackendErrorMessage(err) || 'Failed to complete.'
-      );
+      if (status === 409) {
+        Alert.alert('Already Completed', 'This item was already put away. Refreshing…');
+      } else {
+        const alert = formatSinglePutAwayError(err, 'Failed to complete.');
+        Alert.alert(alert.title, alert.message);
+      }
     } finally {
       setCompletingId(null);
     }
@@ -372,6 +441,13 @@ export default function PutawayScreen() {
   // ---------- Assign all pending items in a group ----------
   const handleAssignGroup = async (group: PutAwayGroup, bin: BinInfo) => {
     if (!selectedList) return;
+    if (backgroundJob) {
+      Alert.alert(
+        'Still saving',
+        'A previous put-away is still being confirmed. Wait for it to finish (or dismiss the banner), then assign to the next bin.'
+      );
+      return;
+    }
     const pending = group.children.filter((c) => c.status === 'pending');
     if (pending.length === 0) return;
     setAssigningAll(true);
@@ -390,24 +466,22 @@ export default function PutawayScreen() {
         const messages = failed
           .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
           .filter((m) => m);
-        Alert.alert('Some items were not assigned', messages.join('\n'));
+        const alert = buildPutAwayFailureAlert(messages, completedIds.length, pending.length);
+        Alert.alert(alert.title, alert.message);
       }
     } catch (err: any) {
       if (err instanceof putawayService.PutAwayStillPendingError) {
+        setBackgroundJob({
+          kind: 'poll',
+          jobId: err.jobId,
+          binLabel: bin.full_path || bin.location_code || bin.qr_code,
+          listId: selectedList.id,
+        });
+      } else if (err instanceof putawayService.PutAwayNetworkError) {
+        setBackgroundJob({ kind: 'reconcile', listId: selectedList.id });
         Alert.alert(
-          'Still processing',
-          'The bulk operation is still running on the server. It will finish in the background.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Keep checking',
-              onPress: () =>
-                void resumeBulkAssignment(
-                  err.jobId,
-                  bin.full_path || bin.location_code || bin.qr_code
-                ),
-            },
-          ]
+          'Connection lost',
+          "Couldn't confirm the put-away result. The list is refreshing so you can see what was saved."
         );
       } else {
         Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
@@ -421,6 +495,13 @@ export default function PutawayScreen() {
   // ---------- Assign all pending items ----------
   const handleAssignAll = async (locationId: string, binLabel: string) => {
     if (!selectedList) return;
+    if (backgroundJob) {
+      Alert.alert(
+        'Still saving',
+        'A previous put-away is still being confirmed. Wait for it to finish (or dismiss the banner), then assign to the next bin.'
+      );
+      return;
+    }
     const pending = (selectedList.items ?? []).filter((i) => i.status === 'pending');
     if (pending.length === 0) {
       Alert.alert('Info', 'No pending items.');
@@ -444,25 +525,19 @@ export default function PutawayScreen() {
         const messages = failed
           .map((f) => f.message || f.error || f.detail || 'Something went wrong.')
           .filter((m) => m);
-        Alert.alert(
-          `${completedIds.length}/${pending.length} assigned — some failed`,
-          messages.join('\n')
-        );
+        const alert = buildPutAwayFailureAlert(messages, completedIds.length, pending.length);
+        Alert.alert(alert.title, alert.message);
       } else {
         Alert.alert('Done', `${completedIds.length}/${pending.length} items assigned.`);
       }
     } catch (err: any) {
       if (err instanceof putawayService.PutAwayStillPendingError) {
+        setBackgroundJob({ kind: 'poll', jobId: err.jobId, binLabel, listId: selectedList.id });
+      } else if (err instanceof putawayService.PutAwayNetworkError) {
+        setBackgroundJob({ kind: 'reconcile', listId: selectedList.id });
         Alert.alert(
-          'Still processing',
-          'The bulk operation is still running on the server. It will finish in the background.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Keep checking',
-              onPress: () => void resumeBulkAssignment(err.jobId, binLabel),
-            },
-          ]
+          'Connection lost',
+          "Couldn't confirm the put-away result. The list is refreshing so you can see what was saved."
         );
       } else {
         Alert.alert('Error', getBackendErrorMessage(err) || 'Failed to assign items.');
@@ -560,6 +635,8 @@ export default function PutawayScreen() {
   };
 
   const handleBackToList = () => {
+    setBackgroundJob(null);
+    selectedListIdRef.current = null;
     setViewMode('list');
     setSelectedList(null);
     loadLists(); // Refresh
@@ -645,6 +722,38 @@ export default function PutawayScreen() {
         >
           {(ctx) => (
             <View>
+              {/* In-progress bulk job banner */}
+              {backgroundJob && (
+                <View style={styles.inProgressBanner}>
+                  <ActivityIndicator size="small" color="#60A5FA" />
+                  <Text style={styles.inProgressText}>
+                    {backgroundJob.kind === 'poll'
+                      ? 'Put-away is still saving on the server. Checking status automatically…'
+                      : "Couldn't confirm the result. Refreshing the list…"}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.refreshBtn}
+                    onPress={() => {
+                      if (backgroundJob.kind === 'poll') {
+                        void resumeBulkAssignment(backgroundJob.jobId, backgroundJob.binLabel, backgroundJob.listId);
+                      } else if (backgroundJob.listId) {
+                        void refreshDetail(backgroundJob.listId);
+                      }
+                    }}
+                  >
+                    <Text style={styles.refreshBtnText}>Refresh</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dismissBtn}
+                    onPress={() => setBackgroundJob(null)}
+                  >
+                    <Text style={styles.dismissBtnText}>
+                      {backgroundJob.kind === 'poll' ? 'Stop' : 'Dismiss'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {/* Progress bar */}
               <View style={styles.detailProgressBarWrap}>
                 <View style={styles.detailProgressBar}>
