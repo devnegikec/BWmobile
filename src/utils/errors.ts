@@ -144,3 +144,75 @@ export function getBackendErrorInfo(err: any): BackendErrorInfo {
     status,
   };
 }
+
+// ============================================================
+// Put-away bin capacity helpers
+// ============================================================
+
+const CAPACITY_EXCEEDED_RE = /capacity exceeded/i;
+
+/** True when a backend message describes a bin capacity (volume/weight) overflow. */
+export function isBinCapacityExceeded(message: string): boolean {
+  return CAPACITY_EXCEEDED_RE.test(message ?? '');
+}
+
+/** Extract the quoted bin code (e.g. `'Z01-A01-B01-L01-BN005'`) from a message. */
+export function extractBinCodeFromMessage(message: string): string | null {
+  const match = (message ?? '').match(/'([^']+)'/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Build a concise alert for a bulk put-away that had partial failures.
+ *
+ * When every failure is a bin capacity overflow, the operator gets a short
+ * "Bin is full" message with the bin code and the number of unassigned items —
+ * instead of the backend's verbose float math repeated once per item. Failed
+ * items remain pending so the operator can scan a different bin.
+ */
+export function buildPutAwayFailureAlert(
+  errors: string[],
+  assignedCount: number,
+  totalCount: number
+): { title: string; message: string } {
+  const distinct = Array.from(
+    new Set((errors ?? []).map((m) => (m ?? '').trim()).filter(Boolean))
+  );
+  const failedCount = Math.max(totalCount - assignedCount, 0);
+
+  if (distinct.length > 0 && distinct.every(isBinCapacityExceeded)) {
+    const binCode = extractBinCodeFromMessage(distinct[0]);
+    return {
+      title: `${assignedCount}/${totalCount} assigned — bin is full`,
+      message: binCode
+        ? `Not enough space in bin '${binCode}'.\n\n${failedCount} item(s) were not assigned. Scan a different bin to continue.`
+        : `${failedCount} item(s) were not assigned — there is not enough space in the bin. Scan a different bin to continue.`,
+    };
+  }
+
+  return {
+    title: `${assignedCount}/${totalCount} assigned — some failed`,
+    message: distinct.join('\n'),
+  };
+}
+
+/**
+ * Format a single-item put-away failure, turning a capacity overflow into a
+ * short, actionable "Bin is full" message instead of raw backend float math.
+ */
+export function formatSinglePutAwayError(
+  err: any,
+  fallback = 'Failed to assign item.'
+): { title: string; message: string } {
+  const message = getBackendErrorMessage(err) || fallback;
+  if (isBinCapacityExceeded(message)) {
+    const binCode = extractBinCodeFromMessage(message);
+    return {
+      title: 'Bin is full',
+      message: binCode
+        ? `Not enough space in bin '${binCode}'. Scan a different bin to continue.`
+        : 'Not enough space in the bin. Scan a different bin to continue.',
+    };
+  }
+  return { title: 'Error', message };
+}

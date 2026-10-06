@@ -188,6 +188,36 @@ export const styles = StyleSheet.create({
   },
   warningBannerText: { color: '#F59E0B', fontSize: 13 },
 
+  // In-progress bulk job banner (auto-refresh + manual refresh)
+  inProgressBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(26,115,232,0.15)',
+    borderColor: '#1A73E8',
+    borderWidth: 1,
+    padding: 12,
+    marginHorizontal: 24,
+    marginTop: 16,
+    borderRadius: 10,
+  },
+  inProgressText: { flex: 1, color: '#93C5FD', fontSize: 13, lineHeight: 18 },
+  refreshBtn: {
+    backgroundColor: '#1A73E8',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  refreshBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  dismissBtn: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  dismissBtnText: { color: '#93C5FD', fontWeight: '600', fontSize: 13 },
+
   // Detail
   detailContent: { padding: 24, paddingBottom: 40 },
   itemCard: {

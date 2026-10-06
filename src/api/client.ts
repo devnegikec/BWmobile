@@ -277,16 +277,25 @@ async function handle401(error: AxiosError) {
 // Log failed requests in dev, then auto-refresh on 401
 function responseErrorHandler(error: AxiosError) {
   if (__DEV__) {
-    console.warn(
-      `[api] ${error.config?.method?.toUpperCase() ?? 'GET'} ${error.config?.url ?? ''
-      } failed`,
-      {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        message: error.message,
-      }
-    );
+    const method = error.config?.method?.toUpperCase() ?? 'GET';
+    const url = error.config?.url ?? '';
+    if (error.response) {
+      // A real HTTP error — log the status + body so it's debuggable.
+      console.warn(`[api] ${method} ${url} failed`, {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+      });
+    } else if (error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '')) {
+      // Request aborted by the client timeout.
+      console.warn(
+        `[api] ${method} ${url} timed out (${error.config?.timeout ?? 'default'}ms limit)`
+      );
+    } else {
+      // No HTTP response: connection reset / dropped / DNS / server down.
+      // Log one clear line instead of a scary object full of `undefined`.
+      console.warn(`[api] ${method} ${url} network error (${error.code ?? 'no response'})`);
+    }
   }
   return handle401(error);
 }

@@ -102,6 +102,24 @@ export class PutAwayStillPendingError extends Error {
 }
 
 /**
+ * Raised when a bulk put-away request fails at the network level (no HTTP
+ * response) — e.g. a timeout or dropped connection. The server may or may not
+ * have applied the change, so callers should reconcile state instead of
+ * assuming the operation failed outright.
+ */
+export class PutAwayNetworkError extends Error {
+  constructor(message = 'Network error during put-away') {
+    super(message);
+    this.name = 'PutAwayNetworkError';
+  }
+}
+
+/** True for Axios failures with no HTTP response (timeout / connection drop). */
+function isNetworkError(err: any): boolean {
+  return !!err?.isAxiosError && !err?.response;
+}
+
+/**
  * Extract the completed job's `{ completed, failed, summary }` result. The
  * backend contract nests it under `result`, but fall back to the top-level
  * fields in case a completed job is returned flattened.
@@ -116,6 +134,33 @@ function extractBulkResult(job: BulkPutAwayJobResponse): CompletePutAwayItemsRes
 }
 
 /**
+ * Fetch the current status of a queued bulk put-away job exactly once.
+ *
+ * - `completed` → resolves with the per-item `{ completed, failed, summary }`.
+ * - `failed`    → throws the backend's error.
+ * - queued/processing → throws `PutAwayStillPendingError` (carrying `jobId`) so
+ *   the caller can decide to keep waiting or retry later.
+ * - network error (no HTTP response) → propagates for the caller to reconcile.
+ *
+ * This is the lightweight primitive used by background auto-refresh; unlike
+ * `pollBulkPutAwayJob` it never blocks on its own retry loop.
+ */
+export async function checkBulkPutAwayJob(jobId: string): Promise<CompletePutAwayItemsResponse> {
+  const { data: job } = await coreClient.get<BulkPutAwayJobResponse>(
+    `/put-away/bulk-jobs/${jobId}`,
+    // A single status probe should be fast; don't let it hang the caller.
+    { timeout: BULK_PUTAWAY_POLL_MAX_INTERVAL }
+  );
+  if (job.status === 'completed') {
+    return extractBulkResult(job);
+  }
+  if (job.status === 'failed') {
+    throw new Error(job.error ?? 'Bulk put-away failed');
+  }
+  throw new PutAwayStillPendingError(jobId);
+}
+
+/**
  * Poll an already-queued bulk put-away job until it completes or fails.
  * Throws `PutAwayStillPendingError` (carrying `jobId`) when the deadline
  * elapses so the caller can resume checking without re-submitting.
@@ -124,17 +169,18 @@ export async function pollBulkPutAwayJob(jobId: string): Promise<CompletePutAway
   const deadline = Date.now() + BULK_PUTAWAY_POLL_DEADLINE;
   let delayMs = BULK_PUTAWAY_POLL_INTERVAL;
   while (Date.now() < deadline) {
-    const { data: job } = await coreClient.get<BulkPutAwayJobResponse>(
-      `/put-away/bulk-jobs/${jobId}`
-    );
-    if (job.status === 'completed') {
-      return extractBulkResult(job);
+    try {
+      return await checkBulkPutAwayJob(jobId);
+    } catch (err: any) {
+      if (err instanceof PutAwayStillPendingError || isNetworkError(err)) {
+        // Still queued/processing, or a transient network error while checking —
+        // keep retrying until the deadline instead of losing the job.
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, BULK_PUTAWAY_POLL_MAX_INTERVAL);
+        continue;
+      }
+      throw err;
     }
-    if (job.status === 'failed') {
-      throw new Error(job.error ?? 'Bulk put-away failed');
-    }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    delayMs = Math.min(delayMs * 2, BULK_PUTAWAY_POLL_MAX_INTERVAL);
   }
   throw new PutAwayStillPendingError(jobId);
 }
@@ -144,15 +190,38 @@ export async function completePutAwayItems(
   binId: string,
   itemIds: string[]
 ): Promise<CompletePutAwayItemsResponse> {
-  const { data } = await coreClient.post<
-    CompletePutAwayItemsResponse | { job_id: string; status: string }
-  >(
-    `/put-away/${listId}/complete`,
-    { bin_id: binId, item_ids: itemIds },
-    // Synchronous completion runs inline, so allow more headroom than the
-    // 15s default; async enqueue returns in milliseconds regardless.
-    { timeout: BULK_PUTAWAY_POST_TIMEOUT }
-  );
+  let data: CompletePutAwayItemsResponse | { job_id: string; status: string } | null = null;
+  let lastError: any = null;
+
+  // The bulk complete endpoint is idempotent (re-completing an item is a
+  // no-op), so a timeout / dropped connection is safe to retry with backoff
+  // before surfacing a network error the caller can reconcile.
+  const retryDelays = [0, 1000, 2500];
+  for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    }
+    try {
+      const res = await coreClient.post<
+        CompletePutAwayItemsResponse | { job_id: string; status: string }
+      >(
+        `/put-away/${listId}/complete`,
+        { bin_id: binId, item_ids: itemIds },
+        // Synchronous completion runs inline, so allow more headroom than the
+        // 15s default; async enqueue returns in milliseconds regardless.
+        { timeout: BULK_PUTAWAY_POST_TIMEOUT }
+      );
+      data = res.data;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (!isNetworkError(err)) break;
+    }
+  }
+
+  if (!data) {
+    throw isNetworkError(lastError) ? new PutAwayNetworkError() : lastError;
+  }
 
   // Synchronous response carries the result directly — no polling needed.
   if (!('job_id' in data) || !data.job_id) {
