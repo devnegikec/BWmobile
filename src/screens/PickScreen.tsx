@@ -81,7 +81,14 @@ function normalizePickList(list: PickList): PickList {
  * known cases to plain language, and fall back to the shared backend-message
  * extractor (which also covers network/timeout errors).
  */
-function friendlyScanError(err: any): string {
+const BIN_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/** Replace raw bin UUIDs in a backend message with their bin codes. */
+function replaceBinIdsWithCodes(message: string, binCodeById: Map<string, string>): string {
+    return message.replace(BIN_ID_RE, (id) => binCodeById.get(id) ?? id);
+}
+
+function friendlyScanError(err: any, binCodeById?: Map<string, string>): string {
     const data = err?.response?.data;
     const code = typeof data?.error === 'string' ? data.error : null;
     const entityType = typeof data?.entity_type === 'string' ? data.entity_type : null;
@@ -92,7 +99,14 @@ function friendlyScanError(err: any): string {
     if (code === 'NOT_FOUND') {
         return 'Item not found — it may already be picked or not on this list.';
     }
-    return getBackendErrorMessage(err) || 'Scan failed. Please try again.';
+
+    let message = getBackendErrorMessage(err) || 'Scan failed. Please try again.';
+    // The backend wrong-bin message carries raw location UUIDs — swap them for
+    // the human-readable bin codes the operator actually sees on the floor.
+    if (binCodeById && /wrong bin/i.test(message)) {
+        message = replaceBinIdsWithCodes(message, binCodeById);
+    }
+    return message;
 }
 
 export default function PickScreen() {
@@ -382,6 +396,18 @@ export default function PickScreen() {
             return;
         }
 
+        // Map bin UUIDs → codes so wrong-bin errors show the bin code instead
+        // of the raw location id.
+        const binCodeById = new Map<string, string>();
+        for (const item of selectedList.items ?? []) {
+            if (item.bin_location_id && item.bin_location_path) {
+                binCodeById.set(item.bin_location_id, item.bin_location_path);
+            }
+        }
+        if (verifiedBin?.locationId) {
+            binCodeById.set(verifiedBin.locationId, verifiedBin.label);
+        }
+
         setSubmitting(true);
         setScanNotice(null);
         try {
@@ -425,7 +451,7 @@ export default function PickScreen() {
                             else offList += 1;
                         } catch (err: any) {
                             failed += 1;
-                            failureReasons.add(friendlyScanError(err));
+                            failureReasons.add(friendlyScanError(err, binCodeById));
                             // Raw detail goes to the dev log only — the worker
                             // sees the friendly summary below.
                             console.warn(
@@ -453,7 +479,7 @@ export default function PickScreen() {
             await recordSinglePick(qr);
             await refreshDetail(selectedList.id);
         } catch (err: any) {
-            showScanNotice('error', friendlyScanError(err));
+            showScanNotice('error', friendlyScanError(err, binCodeById));
         } finally {
             setSubmitting(false);
             setScanText('');
