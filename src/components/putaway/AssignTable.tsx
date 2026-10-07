@@ -56,12 +56,12 @@ export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign, onS
             {/* Product / SKU */}
             <View style={[styles.cell, styles.colProduct]}>
               {isChild ? (
-                <Text style={styles.serial} numberOfLines={1}>
+                <Text style={styles.serial} numberOfLines={2}>
                   {'   '}{row.productName}
                 </Text>
               ) : (
                 <>
-                  <Text style={styles.name} numberOfLines={1}>
+                  <Text style={styles.name} numberOfLines={2}>
                     {isExpanded ? '▼ ' : '▶ '}{row.productName}
                   </Text>
                   <Text style={styles.sku}>{row.sku}</Text>
@@ -71,7 +71,7 @@ export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign, onS
 
             {/* Batch */}
             <View style={[styles.cell, styles.colBatch]}>
-              <Text style={styles.batch} numberOfLines={1}>{row.batchNumber}</Text>
+              <Text style={styles.batch} numberOfLines={2}>{row.batchNumber}</Text>
             </View>
 
             {/* Qty */}
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
   table: { backgroundColor: '#1A2332', borderRadius: 10, borderWidth: 1, borderColor: '#2A3A4A', overflow: 'hidden' },
   headers: { flexDirection: 'row', backgroundColor: '#0F1923', paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#2A3A4A' },
   header: { color: '#667788', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  colProduct: { flex: 5, minWidth: 0 },
+  colProduct: { flex: 3, minWidth: 0 },
   colBatch: { flex: 2, minWidth: 0 },
   colQty: { width: 40, alignItems: 'center' as const },
   colAction: { width: 100, alignItems: 'flex-end' as const },

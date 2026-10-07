@@ -44,12 +44,12 @@ export default function RejectedItemsTable({
             {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
             <View style={[styles.utCell, styles.utColProduct]}>
               {isChild ? (
-                <Text style={[styles.utSerialNumber, styles.utTextRejected]} numberOfLines={1}>
+                <Text style={[styles.utSerialNumber, styles.utTextRejected]} numberOfLines={2}>
                   {'  └ '}{row.productName}
                 </Text>
               ) : (
                 <>
-                  <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={1}>
+                  <Text style={[styles.utProductName, styles.utTextRejected]} numberOfLines={2}>
                     {row.productName}
                   </Text>
                   <Text style={[styles.utSku, styles.utTextRejected]}>{row.sku}</Text>

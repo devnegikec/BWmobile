@@ -802,21 +802,21 @@ export default function PutawayScreen() {
                           onPress={() => toggleGroup(apiGroup.id)}
                         >
                           <View style={[styles.tableCell, styles.colProduct]}>
-                            <Text style={styles.tableName} numberOfLines={1}>
+                            <Text style={styles.tableName} numberOfLines={2}>
                               {expanded ? '▼ ' : '▶ '}{apiGroup.product_name ?? sku}
                             </Text>
                             {apiGroup.parent_qseal?.serial_number ? (
-                              <Text style={styles.tableSku} numberOfLines={1}>{apiGroup.parent_qseal.serial_number}</Text>
+                              <Text style={styles.tableSku} numberOfLines={2}>{apiGroup.parent_qseal.serial_number}</Text>
                             ) : null}
-                            <Text style={styles.tableSku} numberOfLines={1}>{sku}</Text>
+                            <Text style={styles.tableSku} numberOfLines={2}>{sku}</Text>
                             {apiGroup.bin_location_code ? (
-                              <Text style={styles.tableBin} numberOfLines={1}>📍 {apiGroup.bin_location_code}</Text>
+                              <Text style={styles.tableBin} numberOfLines={2}>📍 {apiGroup.bin_location_code}</Text>
                             ) : apiGroup.item_id && suggestedBins[apiGroup.item_id] ? (
-                              <Text style={styles.tableBin} numberOfLines={1}>📍 Suggested: {suggestedBins[apiGroup.item_id]}</Text>
+                              <Text style={styles.tableBin} numberOfLines={2}>📍 Suggested: {suggestedBins[apiGroup.item_id]}</Text>
                             ) : null}
                           </View>
                           <View style={[styles.tableCell, styles.colBatch]}>
-                            <Text style={styles.tableBatch} numberOfLines={1}>{batch}</Text>
+                            <Text style={styles.tableBatch} numberOfLines={2}>{batch}</Text>
                           </View>
                           <View style={[styles.tableCell, styles.colQty]}>
                             <Text style={styles.tableQty}>{item.quantity}</Text>
@@ -865,17 +865,17 @@ export default function PutawayScreen() {
                               style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
                             >
                               <View style={[styles.tableCell, styles.colProduct]}>
-                                <Text style={styles.tableChildName} numberOfLines={1}>
+                                <Text style={styles.tableChildName} numberOfLines={2}>
                                   {'   '}{child.serial_number ?? child.batch_number ?? '—'}
                                 </Text>
                                 {child.manufacturing_date || child.expiry_date ? (
-                                  <Text style={styles.tableSku} numberOfLines={1}>
+                                  <Text style={styles.tableSku} numberOfLines={2}>
                                     Mfg: {child.manufacturing_date ?? '—'} · Exp: {child.expiry_date ?? '—'}
                                   </Text>
                                 ) : null}
                               </View>
                               <View style={[styles.tableCell, styles.colBatch]}>
-                                <Text style={styles.tableBatch} numberOfLines={1}>{child.batch_number ?? '—'}</Text>
+                                <Text style={styles.tableBatch} numberOfLines={2}>{child.batch_number ?? '—'}</Text>
                               </View>
                               <View style={[styles.tableCell, styles.colQty]}>
                                 <Text style={styles.tableQty}>{child.quantity || 1}</Text>
@@ -912,14 +912,14 @@ export default function PutawayScreen() {
                         onPress={() => toggleGroup(group.key)}
                       >
                         <View style={[styles.tableCell, styles.colProduct]}>
-                          <Text style={styles.tableName} numberOfLines={1}>
+                          <Text style={styles.tableName} numberOfLines={2}>
                             {expanded ? '▼ ' : '▶ '}{group.name}
                           </Text>
-                          <Text style={styles.tableSku} numberOfLines={1}>{group.sku}</Text>
+                          <Text style={styles.tableSku} numberOfLines={2}>{group.sku}</Text>
                           {group.children[0]?.bin_location_code ? (
-                            <Text style={styles.tableBin} numberOfLines={1}>📍 {group.children[0].bin_location_code}</Text>
+                            <Text style={styles.tableBin} numberOfLines={2}>📍 {group.children[0].bin_location_code}</Text>
                           ) : suggestedBins[group.key] ? (
-                            <Text style={styles.tableBin} numberOfLines={1}>📍 Suggested: {suggestedBins[group.key]}</Text>
+                            <Text style={styles.tableBin} numberOfLines={2}>📍 Suggested: {suggestedBins[group.key]}</Text>
                           ) : null}
                         </View>
                         <View style={[styles.tableCell, styles.colBatch]}>
@@ -963,12 +963,12 @@ export default function PutawayScreen() {
                               style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
                             >
                               <View style={[styles.tableCell, styles.colProduct]}>
-                                <Text style={styles.tableChildName} numberOfLines={1}>
+                                <Text style={styles.tableChildName} numberOfLines={2}>
                                   {'   '}{child.batch_number || child.sku || group.name}
                                 </Text>
                               </View>
                               <View style={[styles.tableCell, styles.colBatch]}>
-                                <Text style={styles.tableBatch} numberOfLines={1}>
+                                <Text style={styles.tableBatch} numberOfLines={2}>
                                   {child.serial_nos && child.serial_nos.length > 0
                                     ? `${child.serial_nos.length} serials`
                                     : child.batch_number || '—'}

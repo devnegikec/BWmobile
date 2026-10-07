@@ -70,7 +70,7 @@ export default function SummaryTable({
                 <>
                   <Text
                     style={[styles.utSerialNumber, isRejectedRow && styles.utTextRejected]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
                     {'  '}{row.productName}
                   </Text>
@@ -79,7 +79,7 @@ export default function SummaryTable({
                 <>
                   <Text
                     style={[styles.utProductName, isRejectedRow && styles.utTextRejected]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
                     {row.isExpandable ? (isExpanded ? '▼ ' : '▶ ') : ''}{row.productName}
                   </Text>
