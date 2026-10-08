@@ -85,7 +85,7 @@ export const styles = StyleSheet.create({
         paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#2A3A4A',
     },
     tableHeader: { color: '#667788', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-    colProduct: { flex: 5, minWidth: 0 },
+    colProduct: { flex: 3, minWidth: 0 },
     colBatch: { flex: 2, minWidth: 0 },
     colQty: { width: 44, textAlign: 'center' },
     colPicked: { width: 52, textAlign: 'right' },

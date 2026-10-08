@@ -47,23 +47,23 @@ export default function PickItemsTable({ groups, expandedGroups, suggestedBins, 
                     <View key={group.key}>
                         <TouchableOpacity style={styles.tableRow} activeOpacity={0.7} onPress={() => onToggleGroup(group.key)}>
                             <View style={[styles.tableCell, styles.colProduct]}>
-                                <Text style={styles.tableName} numberOfLines={1}>
+                                <Text style={styles.tableName} numberOfLines={2}>
                                     {expanded ? '▼ ' : '▶ '}{group.name}
                                 </Text>
-                                <Text style={styles.tableSku} numberOfLines={1}>{group.sku}</Text>
+                                <Text style={styles.tableSku} numberOfLines={2}>{group.sku}</Text>
                                 {bins.length > 0 && (
-                                    <Text style={styles.tableBin} numberOfLines={1}>
+                                    <Text style={styles.tableBin} numberOfLines={2}>
                                         📍 {bins[0]}{bins.length > 1 ? ` +${bins.length - 1}` : ''}
                                     </Text>
                                 )}
                                 {bins.length === 0 && suggested && (
-                                    <Text style={styles.tableBin} numberOfLines={1}>
+                                    <Text style={styles.tableBin} numberOfLines={2}>
                                         📍 Suggested: {suggested}
                                     </Text>
                                 )}
                             </View>
                             <View style={[styles.tableCell, styles.colBatch]}>
-                                <Text style={styles.tableBatch} numberOfLines={1}>{batch || '—'}</Text>
+                                <Text style={styles.tableBatch} numberOfLines={2}>{batch || '—'}</Text>
                             </View>
                             <View style={[styles.tableCell, styles.colQty]}>
                                 <Text style={styles.tableQty}>{groupQty}</Text>

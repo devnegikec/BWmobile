@@ -66,11 +66,11 @@ export default function SummaryTable({
           >
             {/* Col 1: Product/SKU (parent) or Serial Number (child) */}
             <View style={[styles.utCell, styles.utColProduct]}>
+              {/* Child unit serial — never truncate, operators must verify the full identifier */}
               {isChild ? (
                 <>
                   <Text
                     style={[styles.utSerialNumber, isRejectedRow && styles.utTextRejected]}
-                    numberOfLines={1}
                   >
                     {'  '}{row.productName}
                   </Text>
@@ -79,7 +79,7 @@ export default function SummaryTable({
                 <>
                   <Text
                     style={[styles.utProductName, isRejectedRow && styles.utTextRejected]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
                     {row.isExpandable ? (isExpanded ? '▼ ' : '▶ ') : ''}{row.productName}
                   </Text>

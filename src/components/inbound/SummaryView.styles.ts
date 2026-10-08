@@ -51,7 +51,7 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
   },
-  utColProduct: { flex: 5, minWidth: 0 },
+  utColProduct: { flex: 3, minWidth: 0 },
   utColBatch: { flex: 2, minWidth: 0 },
   utColBoxes: { width: 55, alignItems: 'center' as const },
   /** Wider boxes column used when the Action column is hidden (read-only table) */
