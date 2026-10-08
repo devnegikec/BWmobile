@@ -55,8 +55,9 @@ export function AssignTable({ rows, expandedBoxes, onToggleExpand, onAssign, onS
           >
             {/* Product / SKU */}
             <View style={[styles.cell, styles.colProduct]}>
+              {/* Child unit serial — never truncate, operators must verify the full identifier */}
               {isChild ? (
-                <Text style={styles.serial} numberOfLines={2}>
+                <Text style={styles.serial}>
                   {'   '}{row.productName}
                 </Text>
               ) : (

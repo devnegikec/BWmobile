@@ -865,7 +865,8 @@ export default function PutawayScreen() {
                               style={[styles.tableRow, styles.tableRowChild, isDone && styles.tableRowDone, isSkipped && styles.tableRowSkipped]}
                             >
                               <View style={[styles.tableCell, styles.colProduct]}>
-                                <Text style={styles.tableChildName} numberOfLines={2}>
+                                {/* Child unit serial — never truncate, operators must verify the full identifier */}
+                                <Text style={styles.tableChildName}>
                                   {'   '}{child.serial_number ?? child.batch_number ?? '—'}
                                 </Text>
                                 {child.manufacturing_date || child.expiry_date ? (
