@@ -143,7 +143,7 @@ function AppTabs() {
           ),
         }}
       />
-      <Tab.Screen
+      {/* <Tab.Screen
         name="ReceivingSlips"
         component={ReceivingSlipsScreen}
         options={{
@@ -152,8 +152,8 @@ function AppTabs() {
             <TabIcon label="📋" color={color} />
           ),
         }}
-      />
-      <Tab.Screen
+      /> */}
+      {/* <Tab.Screen
         name="InboundExceptions"
         component={InboundExceptionsScreen}
         options={{
@@ -162,8 +162,8 @@ function AppTabs() {
             <TabIcon label="⚠️" color={color} />
           ),
         }}
-      />
-      {canRead && (
+      /> */}
+      {/* {canRead && (
         <Tab.Screen
           name="Returns"
           component={ReturnsScreen}
@@ -174,7 +174,7 @@ function AppTabs() {
             ),
           }}
         />
-      )}
+      )} */}
     </Tab.Navigator>
   );
 }
